@@ -11,6 +11,7 @@
 package com.ibm.ws.sib.jfapchannel.richclient.impl;
 
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 
 import javax.net.ssl.SSLSession;
 
@@ -23,6 +24,7 @@ import com.ibm.ws.sib.utils.ras.SibTr;
 import com.ibm.wsspi.channelfw.ConnectionLink;
 import com.ibm.wsspi.tcpchannel.SSLConnectionContext;
 import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
+import io.netty.channel.Channel;
 
 /**
  * Implementation of conversation meta data interface.
@@ -36,15 +38,18 @@ public class ConversationMetaDataImpl implements ConversationMetaData
    private boolean isInbound;
    //Romil liberty changes changed BaseChannelLink to ChannelLink
    private ConnectionLink baseLink;                                             // F206161.5
+   private Channel nettyChannel;
    
    // Romil liberty change make this method public so that server pacakge can access it
-   public ConversationMetaDataImpl(ChainData chainData, ConnectionLink baseLink)            // F206161.5
+//   public ConversationMetaDataImpl(ChainData chainData, ConnectionLink baseLink, Channel channel)            // F206161.5
+   public ConversationMetaDataImpl(ChainData chainData, ConnectionLink baseLink) 
    {
       if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled()) SibTr.entry(this, tc, "<init>", new Object[]{chainData, baseLink});   // F206161.5
       
       chainName = chainData.getName();
       isInbound = chainData.getType() == FlowType.INBOUND;
       this.baseLink = baseLink;
+//      this.nettyChannel = channel;
          
       if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) SibTr.debug(this, tc, "chainName="+chainName+
                                                      "\nisInbound="+isInbound);
@@ -64,13 +69,15 @@ public class ConversationMetaDataImpl implements ConversationMetaData
    {
       if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled()) SibTr.entry(this, tc, "getRemoteAddress");
       InetAddress result = null;
-      TCPConnectionContext tcpContext = null;
-      ConnectionLink connLinkRef = baseLink.getDeviceLink();
-      if (connLinkRef != null)
-      {
-         tcpContext = (TCPConnectionContext)connLinkRef.getChannelAccessor();
-         if (tcpContext != null) result = tcpContext.getRemoteAddress();
-      }
+//      TCPConnectionContext tcpContext = null;
+//      ConnectionLink connLinkRef = baseLink.getDeviceLink();
+//      if (connLinkRef != null)
+//      {
+//         tcpContext = (TCPConnectionContext)connLinkRef.getChannelAccessor();
+//         if (tcpContext != null) result = tcpContext.getRemoteAddress();
+//      }
+      if (nettyChannel != null)
+          result = ((InetSocketAddress) nettyChannel.remoteAddress()).getAddress();
       if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled()) SibTr.exit(this, tc, "getRemoteAddress", result);
       return result;
    }
@@ -84,13 +91,16 @@ public class ConversationMetaDataImpl implements ConversationMetaData
       if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled()) SibTr.entry(this, tc, "getRemotePort");
       
       int portNumber = 0;
-      TCPConnectionContext tcpContext = null;
-      ConnectionLink connLinkRef = baseLink.getDeviceLink();
-      if (connLinkRef != null)
-      {
-         tcpContext = (TCPConnectionContext)connLinkRef.getChannelAccessor();
-         if (tcpContext != null) portNumber = tcpContext.getRemotePort();
-      }
+//      TCPConnectionContext tcpContext = null;
+//      ConnectionLink connLinkRef = baseLink.getDeviceLink();
+//      if (connLinkRef != null)
+//      {
+//         tcpContext = (TCPConnectionContext)connLinkRef.getChannelAccessor();
+//         if (tcpContext != null) portNumber = tcpContext.getRemotePort();
+//      }
+      if (nettyChannel != null)
+           portNumber = ((InetSocketAddress) nettyChannel.remoteAddress()).getPort();
+      
       
       if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled()) SibTr.exit(this, tc, "getRemotePort", ""+portNumber);
       return portNumber;

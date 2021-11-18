@@ -75,6 +75,7 @@ public class ListenerPortImpl implements ListenerPort {
             SibTr.entry(this, tc, "close");
 
         // begin F177053
+        // TODO: Verify how to change this to netty framework
         ChannelFramework framework = ChannelFrameworkFactory.getChannelFramework(); // F196678.10
         try {
             framework.stopChain(chainInbound, CHAIN_STOP_TIME);

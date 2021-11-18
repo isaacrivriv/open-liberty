@@ -19,6 +19,11 @@ IBM-Default-Config: OSGI-INF/wlp/defaultInstances.xml
 
 Include-Resource: \
     OSGI-INF=resources/OSGI-INF
+    
+Import-Package: \
+  io.openliberty.netty.internal*,\
+  !*.internal.*,\
+  *
 
 Export-Package: \
 com.ibm.ws.sib.comms.client,\
@@ -83,4 +88,6 @@ instrument.disabled: true
 	com.ibm.ws.timer;version=latest,\
 	com.ibm.ws.container.service;version=latest,\
 	com.ibm.ws.channelfw;version=latest, \
-	com.ibm.ws.org.osgi.annotation.versioning;version=latest
+	com.ibm.ws.org.osgi.annotation.versioning;version=latest, \
+	io.openliberty.io.netty;version=latest, \
+	io.openliberty.netty.internal;version=latest

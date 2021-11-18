@@ -32,7 +32,7 @@ public class JFAPServerInboundChannelFactory implements ChannelFactory {
     /** Property map that may or may not exist for the factory. */
     private Map<Object, Object> commonProperties = null;
 
-    private ChannelFactoryData _channelFactoryData;
+//    private ChannelFactoryData _channelFactoryData;
 
     /**
      * Constructor.
@@ -51,21 +51,22 @@ public class JFAPServerInboundChannelFactory implements ChannelFactory {
 
     public void init(ChannelFactoryData data) throws ChannelFactoryException {
         // nothing
-        _channelFactoryData = data;
+//        _channelFactoryData = data;
     }
 
     /*
      * @see com.ibm.wsspi.channelfw.ChannelFactory#findOrCreateChannel(ChannelData)
-     */
+     */// TODO: This could be a channel pipeline creation here
     public synchronized Channel findOrCreateChannel(ChannelData channelData) throws ChannelException {
-        String channelName = channelData.getName();
-        Channel ret = this.existingChannels.get(channelName);
-        if (ret == null) {
-            // Create the new channel with the input configuration
-            ret = new JFapChannelInbound(_channelFactoryData, channelData);
-            this.existingChannels.put(channelName, ret);
-        }
-        return ret;
+//        String channelName = channelData.getName();
+//        Channel ret = this.existingChannels.get(channelName);
+//        if (ret == null) {
+//            // Create the new channel with the input configuration
+//            ret = new JFapChannelInbound(_channelFactoryData, channelData);
+//            this.existingChannels.put(channelName, ret);
+//        }
+//        return ret;
+        return null;
     }
 
     /**
@@ -73,22 +74,23 @@ public class JFAPServerInboundChannelFactory implements ChannelFactory {
      * 
      * @param channelName
      */
-    public synchronized void removeChannel(String channelName) {
-        this.existingChannels.remove(channelName);
-    }
+//    public synchronized void removeChannel(String channelName) {
+//        this.existingChannels.remove(channelName);
+//    }
 
     /*
      * @see com.ibm.wsspi.channelfw.ChannelFactory#getProperties()
      */
     public Map<Object, Object> getProperties() {
-        return this.commonProperties;
+//        return this.commonProperties;
+        return null;
     }
 
     /*
      * @see com.ibm.wsspi.channelfw.ChannelFactory#updateProperties(java.util.Map)
      */
     public void updateProperties(Map<Object, Object> properties) {
-        this.commonProperties = properties;
+//        this.commonProperties = properties;
     }
 
     /*

@@ -37,6 +37,8 @@ import com.ibm.wsspi.channelfw.ChannelConfiguration;
 import com.ibm.wsspi.kernel.service.utils.AtomicServiceReference;
 import com.ibm.wsspi.kernel.service.utils.MetatypeUtils;
 
+import io.openliberty.netty.internal.NettyFramework;
+
 /**
  * 
  * Start JFAP chain and Secure chain in-line in the context of SCR thread because in the design discussions with Alasdair,
@@ -58,8 +60,10 @@ public class CommsServerServiceFacade {
     private int wasJmsSSLPort;
     private boolean iswasJmsEndpointEnabled = true;
 
-    private static CHFWBundle _chfw_bunlde;
-    private static final AtomicServiceReference<CHFWBundle> _chfwRef = new AtomicServiceReference<CHFWBundle>("chfwBundle");
+//    private static CHFWBundle _chfw_bunlde;
+    private static NettyFramework _netty_bundle;
+//    private static final AtomicServiceReference<CHFWBundle> _chfwRef = new AtomicServiceReference<CHFWBundle>("chfwBundle");
+    private static final AtomicServiceReference<NettyFramework> _nettyRef = new AtomicServiceReference<NettyFramework>("nettyBundle");
 
     private static final AtomicServiceReference<ChannelConfiguration> _tcpOptionsRef = new AtomicServiceReference<ChannelConfiguration>("tcpOptions");
 
@@ -89,7 +93,8 @@ public class CommsServerServiceFacade {
         if (endpointName == null)
             endpointName = Inbound_ConfigAlias + cid;
 
-        _chfwRef.activate(context);
+//        _chfwRef.activate(context);
+        _nettyRef.activate(context);
         _tcpOptionsRef.activate(context);
         _sslOptionsRef.activate(context);
         _sslFactoryProviderRef.activate(context);
@@ -98,16 +103,19 @@ public class CommsServerServiceFacade {
         _commsClientServiceRef.activate(context);
         _eventSvcRef.activate(context);
 
-        _chfw_bunlde = getCHFWBundle();
+//        _chfw_bunlde = getCHFWBundle();
+        
+        _netty_bundle = getNettyBundle();
 
         // Allowing JFAP to accept incoming connections. 
         ServerConnectionManager.initialise(new AcceptListenerFactoryImpl());
 
         //Go ahead and Register JFAPChannel with Channel Framework by providing JFAPServerInboundChannelFactory
-        _chfw_bunlde.getFramework().registerFactory("JFAPChannel", JFAPServerInboundChannelFactory.class);
+//        _chfw_bunlde.getFramework().registerFactory("JFAPChannel", JFAPServerInboundChannelFactory.class);
+        
 
-        inboundChain.init(endpointName, getCHFWBundle());
-        inboundSecureChain.init(endpointName + "-ssl", getCHFWBundle());
+        inboundChain.init(endpointName, getNettyBundle());
+        inboundSecureChain.init(endpointName + "-ssl", getNettyBundle());
 
         modified(context, properties);
 
@@ -124,7 +132,8 @@ public class CommsServerServiceFacade {
         performAction(stopBasicChainAction);
         performAction(stopSSLChainAction);
 
-        _chfwRef.deactivate(ctx);
+//        _chfwRef.deactivate(ctx);
+        _nettyRef.deactivate(ctx);
         _tcpOptionsRef.deactivate(ctx);
         _sslOptionsRef.deactivate(ctx);
         _sslFactoryProviderRef.deactivate(ctx);
@@ -153,6 +162,7 @@ public class CommsServerServiceFacade {
         wasJmsSSLPort = MetatypeUtils.parseInteger(Inbound_ConfigAlias, "wasJmsSSLPort",
                                                    properties.get("wasJmsSSLPort"),
                                                    -1);
+        // TODO: Verify netty config here to enable netty or chfw
 
         Config = properties;
 
@@ -299,16 +309,28 @@ public class CommsServerServiceFacade {
         _commsClientServiceRef.unsetReference(service);
     }
 
-    protected void setChfwBundle(ServiceReference<CHFWBundle> ref) {
-        _chfwRef.setReference(ref);
+//    protected void setChfwBundle(ServiceReference<CHFWBundle> ref) {
+//        _chfwRef.setReference(ref);
+//    }
+//
+//    protected void unsetChfwBundle(ServiceReference<CHFWBundle> ref) {
+//        _chfwRef.unsetReference(ref);
+//    }
+//
+//    private CHFWBundle getCHFWBundle() {
+//        return _chfwRef.getService();
+//    }
+    
+    protected void setNettyBundle(ServiceReference<NettyFramework> ref) {
+        _nettyRef.setReference(ref);
     }
 
-    protected void unsetChfwBundle(ServiceReference<CHFWBundle> ref) {
-        _chfwRef.unsetReference(ref);
+    protected void unsetNettyBundle(ServiceReference<NettyFramework> ref) {
+    	_nettyRef.unsetReference(ref);
     }
 
-    private CHFWBundle getCHFWBundle() {
-        return _chfwRef.getService();
+    private NettyFramework getNettyBundle() {
+        return _nettyRef.getService();
     }
 
     @Trivial
@@ -338,14 +360,14 @@ public class CommsServerServiceFacade {
         //So. we will need not do any thing here.
     }
 
-    /**
-     * Access the current reference to the bytebuffer pool manager.
-     * 
-     * @return WsByteBufferPoolManager
-     */
-    public static WsByteBufferPoolManager getBufferPoolManager() {
-        return _chfw_bunlde.getBufferManager();
-    }
+//    /**
+//     * Access the current reference to the bytebuffer pool manager.
+//     * 
+//     * @return WsByteBufferPoolManager
+//     */
+//    public static WsByteBufferPoolManager getBufferPoolManager() {
+//        return _chfw_bunlde.getBufferManager();
+//    }
 
     @Trivial
     protected void setTcpOptions(ServiceReference<ChannelConfiguration> service) {

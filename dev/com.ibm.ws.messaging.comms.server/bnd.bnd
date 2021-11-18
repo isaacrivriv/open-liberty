@@ -19,9 +19,15 @@ IBM-Default-Config: OSGI-INF/wlp/defaultInstances.xml
 
 Include-Resource: \
     OSGI-INF=resources/OSGI-INF
+    
+Import-Package: \
+  io.openliberty.netty.internal*,\
+  !*.internal.*,\
+  *
 
 Export-Package: \
 com.ibm.ws.jfap.inbound.channel,\
+com.ibm.ws.jfap.inbound.netty,\
 com.ibm.ws.sib.comms.server,\
 com.ibm.ws.sib.comms.server.clientsupport,\
 com.ibm.ws.sib.jfapchannel.server,\
@@ -31,7 +37,7 @@ com.ibm.ws.sib.trm.attach
 Service-Component: \
    com.ibm.ws.messaging.comms.server;\
    implementation:=com.ibm.ws.jfap.inbound.channel.CommsServerServiceFacade;\
-   chfwBundle=com.ibm.websphere.channelfw.osgi.CHFWBundle;\
+   nettyBundle=io.openliberty.netty.internal.NettyFramework;\
    tcpOptions=com.ibm.wsspi.channelfw.ChannelConfiguration;\
    sslOptions=com.ibm.wsspi.channelfw.ChannelConfiguration;\
    sslSupport=com.ibm.websphere.channelfw.osgi.ChannelFactoryProvider;\
@@ -64,5 +70,7 @@ instrument.disabled: true
 	com.ibm.ws.messaging.comms.client;version=latest,\
 	com.ibm.ws.messaging.utils;version=latest, \
 	com.ibm.ws.org.osgi.annotation.versioning;version=latest, \
-	com.ibm.websphere.security;version=latest 
+	com.ibm.websphere.security;version=latest, \
+	io.openliberty.io.netty;version=latest, \
+	io.openliberty.netty.internal;version=latest
 	
