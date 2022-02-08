@@ -20,7 +20,9 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import io.openliberty.netty.internal.BootstrapConfiguration;
+import io.openliberty.netty.internal.BootstrapExtended;
 import io.openliberty.netty.internal.ChannelInitializerWrapper;
 import io.openliberty.netty.internal.ConfigConstants;
 import io.openliberty.netty.internal.ServerBootstrapExtended;
@@ -39,6 +41,27 @@ public class TCPUtils {
         ServerBootstrapExtended bs = new ServerBootstrapExtended();
         bs.group(framework.parentGroup, framework.childGroup);
         bs.channel(NioServerSocketChannel.class);
+        // apply the existing user config to the Netty TCP channel
+        bs.applyConfiguration(config);
+        ChannelInitializerWrapper tcpInitializer = new TCPChannelInitializerImpl(config);
+        bs.setBaseInitializer(tcpInitializer);
+        return bs;
+    }
+    
+    /**
+     * Create a {@link BootstrapExtended} for outbound TCP channels
+     * 
+     * @param framework
+     * @param tcpOptions
+     * @return
+     * @throws NettyException
+     */
+    public static BootstrapExtended createTCPBootstrapOutbound(NettyFrameworkImpl framework,
+        Map<String, Object> tcpOptions) throws NettyException {
+        BootstrapConfiguration config = new TCPConfigurationImpl(tcpOptions, false);
+        BootstrapExtended bs = new BootstrapExtended();
+        bs.group(framework.getParentGroup());
+        bs.channel(NioSocketChannel.class);
         // apply the existing user config to the Netty TCP channel
         bs.applyConfiguration(config);
         ChannelInitializerWrapper tcpInitializer = new TCPChannelInitializerImpl(config);

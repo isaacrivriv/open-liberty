@@ -38,6 +38,11 @@ import com.ibm.wsspi.channelfw.exception.ChannelException;
 import com.ibm.wsspi.kernel.service.utils.AtomicServiceReference;
 import com.ibm.wsspi.kernel.service.utils.MetatypeUtils;
 
+import io.netty.channel.Channel;
+import io.openliberty.netty.internal.BootstrapExtended;
+import io.openliberty.netty.internal.ServerBootstrapExtended;
+import io.openliberty.netty.internal.exception.NettyException;
+
 public class CommsOutboundChain {
     private static final TraceComponent tc = Tr.register(CommsOutboundChain.class, JFapChannelConstants.MSG_GROUP, JFapChannelConstants.MSG_BUNDLE);
     private static final TraceNLS nls = TraceNLS.getTraceNLS(JFapChannelConstants.MSG_BUNDLE);
@@ -62,6 +67,10 @@ public class CommsOutboundChain {
     private boolean _isChainDeactivated = false;
     /** If useSSL is set to true in the outbound connection configuration */
     private boolean _isSSLChain = false;
+    
+    private Channel nettyChannel;
+    
+    private BootstrapExtended bootstrap;
    
     @Trivial
     protected void setCommsClientService(CommsClientServiceFacadeInterface service) {
@@ -190,64 +199,87 @@ public class CommsOutboundChain {
         }
         
         try {
-            ChannelFramework cfw = CommsClientServiceFacade.getChannelFramewrok();
-            cfw.registerFactory("JFapChannelOutbound", JFapChannelFactory.class);
+        	
+        	// Netty Implementation
+        	
+            
+            Map<String, Object> chanProps = new HashMap<String, Object>();
+            chanProps.putAll(getTcpOptions());
+            chanProps.put("ExternalName", _chainName);
+        	
+            bootstrap = CommsClientServiceFacade.getNettyBundle().createTCPBootstrapOutbound(chanProps);
+            
+            // TODO: Verify the handler
+//            bootstrap.handler(new JmsTCPInitializer(bootstrap.getBaseInitializer()));
+            
+            
+            
+        	
+        	// Channel Framework Implementation
+        	
+        	
+//            ChannelFramework cfw = CommsClientServiceFacade.getChannelFramewrok();
+//            cfw.registerFactory("JFapChannelOutbound", JFapChannelFactory.class);
+//
+//            Map<String, Object> tcpOptions = getTcpOptions();
+//
+//            ChannelData tcpChannel = cfw.getChannel(_tcpChannelName);
+//
+//            if (tcpChannel == null) {
+//                String typeName = (String) tcpOptions.get("type");
+//                tcpChannel = cfw.addChannel(_tcpChannelName, cfw.lookupFactory(typeName), new HashMap<Object, Object>(tcpOptions));
+//            }
+//
+//            // SSL Channel
+//            if (_isSSLChain) {
+//                Map<String, Object> sslOptions = getSslOptions();
+//
+//                // Now we are actually trying to create an ssl channel in the chain. Which requires sslOptions and that _isSSLEnabled is true.
+//                if (sslOptions == null) {
+//                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+//                        SibTr.debug(this, tc, "_sslOptions not set, continue waiting");
+//                    throw new ChainException(new Throwable(nls.getFormattedMessage("missingSslOptions.ChainNotStarted", new Object[] { _chainName }, null)));
+//                    // TcpChannel is created but keep waiting for sslOptions.
+//                }
+//                
+//             ChannelData sslChannel = cfw.getChannel(_sslChannelName);
+//                if (sslChannel == null) {
+//                    sslChannel = cfw.addChannel(_sslChannelName, cfw.lookupFactory("SSLChannel"), new HashMap<Object, Object>(sslOptions));
+//                }
+//            }
+//
+//            ChannelData jfapChannel = cfw.getChannel(_jfapChannelName);
+//            if (jfapChannel == null)
+//                jfapChannel = cfw.addChannel(_jfapChannelName, cfw.lookupFactory("JFapChannelOutbound"), null);
+//
+//            final String[] chanList;
+//            if (_isSSLChain)
+//                chanList = new String[] { _jfapChannelName, _sslChannelName, _tcpChannelName };
+//            else
+//                chanList = new String[] { _jfapChannelName, _tcpChannelName };
+//
+//            ChainData cd = cfw.addChain(_chainName, FlowType.OUTBOUND, chanList);
+//            cd.setEnabled(true);
+//                      
+//            // The Fat test:
+//            // /com.ibm.ws.messaging_fat/fat/src/com/ibm/ws/messaging/fat/CommsWithSSL/CommsWithSSLTest.java
+//            // Checks for the presence of this string in the trace log, in order to ascertain that the chain has been enabled.
+//            if (_isSSLChain) {
+//                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+//                    SibTr.debug(this, tc, "JFAP Outbound secure chain" + _chainName + " successfully started ");
+//            } else {
+//                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+//                    SibTr.debug(this, tc, "JFAP Outbound chain" + _chainName + " successfully started ");
+//            }
 
-            Map<String, Object> tcpOptions = getTcpOptions();
-
-            ChannelData tcpChannel = cfw.getChannel(_tcpChannelName);
-
-            if (tcpChannel == null) {
-                String typeName = (String) tcpOptions.get("type");
-                tcpChannel = cfw.addChannel(_tcpChannelName, cfw.lookupFactory(typeName), new HashMap<Object, Object>(tcpOptions));
-            }
-
-            // SSL Channel
-            if (_isSSLChain) {
-                Map<String, Object> sslOptions = getSslOptions();
-
-                // Now we are actually trying to create an ssl channel in the chain. Which requires sslOptions and that _isSSLEnabled is true.
-                if (sslOptions == null) {
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-                        SibTr.debug(this, tc, "_sslOptions not set, continue waiting");
-                    throw new ChainException(new Throwable(nls.getFormattedMessage("missingSslOptions.ChainNotStarted", new Object[] { _chainName }, null)));
-                    // TcpChannel is created but keep waiting for sslOptions.
-                }
-                
-             ChannelData sslChannel = cfw.getChannel(_sslChannelName);
-                if (sslChannel == null) {
-                    sslChannel = cfw.addChannel(_sslChannelName, cfw.lookupFactory("SSLChannel"), new HashMap<Object, Object>(sslOptions));
-                }
-            }
-
-            ChannelData jfapChannel = cfw.getChannel(_jfapChannelName);
-            if (jfapChannel == null)
-                jfapChannel = cfw.addChannel(_jfapChannelName, cfw.lookupFactory("JFapChannelOutbound"), null);
-
-            final String[] chanList;
-            if (_isSSLChain)
-                chanList = new String[] { _jfapChannelName, _sslChannelName, _tcpChannelName };
-            else
-                chanList = new String[] { _jfapChannelName, _tcpChannelName };
-
-            ChainData cd = cfw.addChain(_chainName, FlowType.OUTBOUND, chanList);
-            cd.setEnabled(true);
-                      
-            // The Fat test:
-            // /com.ibm.ws.messaging_fat/fat/src/com/ibm/ws/messaging/fat/CommsWithSSL/CommsWithSSLTest.java
-            // Checks for the presence of this string in the trace log, in order to ascertain that the chain has been enabled.
-            if (_isSSLChain) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-                    SibTr.debug(this, tc, "JFAP Outbound secure chain" + _chainName + " successfully started ");
-            } else {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-                    SibTr.debug(this, tc, "JFAP Outbound chain" + _chainName + " successfully started ");
-            }
-
-        } catch (ChannelException | ChainException exception) {
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-                SibTr.debug(this, tc, "JFAP Outbound chain " + _chainName + " failed to start, exception ="+exception);
-        } 
+//        } catch (ChannelException | ChainException exception) {
+//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+//                SibTr.debug(this, tc, "JFAP Outbound chain " + _chainName + " failed to start, exception ="+exception);
+        } catch (NettyException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			SibTr.debug(this, tc, "JFAP Outbound chain " + _chainName + " failed to start, exception ="+e);
+		} 
                
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.exit(this, tc, "createJFAPChain");
@@ -293,23 +325,23 @@ public class CommsOutboundChain {
         }
 
         try {
-            ChannelFramework cfw = CommsClientServiceFacade.getChannelFramewrok();
+//            ChannelFramework cfw = CommsClientServiceFacade.getChannelFramewrok();
             OutboundConnectionTracker oct = ClientConnectionManager.getRef().getOutboundConnectionTracker();
             if (oct != null) {
                 oct.terminateConnectionsAssociatedWithChain(_chainName);
             } else {// if we dont have any oct that means there were no connections established
 
-                if (cfw.getChain(_chainName) != null) {// see if chain exist only then destroy
-                    // we have to destroy using vcf because cfw does not allow to destroy outbound 
-                    // chains directly using cfw.destroyChain(chainname)
-                    // as it is valid only for inbound chains as of now
-                    cfw.getOutboundVCFactory(_chainName).destroy();
-                }
+//                if (cfw.getChain(_chainName) != null) {// see if chain exist only then destroy
+//                    // we have to destroy using vcf because cfw does not allow to destroy outbound 
+//                    // chains directly using cfw.destroyChain(chainname)
+//                    // as it is valid only for inbound chains as of now
+//                    cfw.getOutboundVCFactory(_chainName).destroy();
+//                }
             }
-            ChainData cd = cfw.getChain(_chainName);
-            if (cd != null) {
-                cfw.removeChain(cd);
-            }
+//            ChainData cd = cfw.getChain(_chainName);
+//            if (cd != null) {
+//                cfw.removeChain(cd);
+//            }
             
         } catch (Exception exception) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
@@ -334,18 +366,18 @@ public class CommsOutboundChain {
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.entry(this, tc, "removeChannel", channelName);
         
-        ChannelFramework cfw = CommsClientServiceFacade.getChannelFramewrok();
+//        ChannelFramework cfw = CommsClientServiceFacade.getChannelFramewrok();
 
-        try {
-            if (cfw.getChannel(channelName) != null)
-                cfw.removeChannel(channelName);
-        } catch (ChannelException | ChainException exception) {
-            // Neither of these exceptions are permanent failures. 
-            // They usually indicate that we're the looser of a race with the channel framework to
-            // tear down the chain. For example, the SSL feature was removed.
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-                SibTr.debug(this, tc, "Error removing channel:" + channelName, exception);
-        }
+//        try {
+//            if (cfw.getChannel(channelName) != null)
+//                cfw.removeChannel(channelName);
+//        } catch (ChannelException | ChainException exception) {
+//            // Neither of these exceptions are permanent failures. 
+//            // They usually indicate that we're the looser of a race with the channel framework to
+//            // tear down the chain. For example, the SSL feature was removed.
+//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+//                SibTr.debug(this, tc, "Error removing channel:" + channelName, exception);
+//        }
         
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.exit(this, tc, "removeChannel");

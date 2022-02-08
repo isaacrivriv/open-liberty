@@ -30,6 +30,18 @@ public interface NettyFramework {
      * @return ServerBootstrap
      */
     ServerBootstrapExtended createTCPBootstrap(Map<String, Object> tcpOptions) throws NettyException;
+    
+    /**
+     * Create a TCP bootstrap for outbound connections: handles registering the
+     * correct EventLoopGroups, creating a NioServerSocketChannel, and implementing
+     * the props in tcpOptions.
+     * 
+     * Users should add any child handlers via the returned {@link ServerBootstrap}
+     * 
+     * @param tcpOptions
+     * @return ServerBootstrap
+     */
+    BootstrapExtended createTCPBootstrapOutbound(Map<String, Object> tcpOptions) throws NettyException;
 
     /**
      * Create a UDP bootstrap: handles registering the correct EventLoopGroups, creating a

@@ -27,7 +27,7 @@ public class JmsTCPInitializer extends ChannelInitializerWrapper{
         }
         // TODO: Add to pipeline
 //        pipeline.addLast("decoder", new SipMessageBufferStreamDecoder());
-//        pipeline.addLast("handler", new SipStreamHandler());
+        pipeline.addLast("handler", new JmsChannelHandler());
     }
 	
 }

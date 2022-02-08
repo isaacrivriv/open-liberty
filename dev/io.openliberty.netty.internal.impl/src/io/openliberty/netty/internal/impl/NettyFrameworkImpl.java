@@ -286,6 +286,11 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
     public ServerBootstrapExtended createTCPBootstrap(Map<String, Object> tcpOptions) throws NettyException {
         return TCPUtils.createTCPBootstrap(this, tcpOptions);
     }
+    
+    @Override
+    public BootstrapExtended createTCPBootstrapOutbound(Map<String, Object> tcpOptions) throws NettyException {
+        return TCPUtils.createTCPBootstrapOutbound(this, tcpOptions);
+    }
 
     @Override
     public BootstrapExtended createUDPBootstrap(Map<String, Object> options) throws NettyException {
@@ -355,6 +360,10 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
     @Override
     public void destroy() {
         // destroy covered by serverStopping
+    }
+    
+    public EventLoopGroup getParentGroup() {
+        return this.parentGroup;
     }
 
     private void logChannelStopped(Channel channel) {

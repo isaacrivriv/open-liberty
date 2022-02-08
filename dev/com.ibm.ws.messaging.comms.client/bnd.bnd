@@ -54,7 +54,7 @@ Service-Component: \
    com.ibm.ws.messaging.comms.client;\
      implementation:=com.ibm.ws.sib.jfapchannel.impl.CommsClientServiceFacade;\
      provide:=com.ibm.ws.sib.comms.CommsClientServiceFacadeInterface; \
-     chfwBundle=com.ibm.websphere.channelfw.osgi.CHFWBundle;\
+     nettyBundle=io.openliberty.netty.internal.NettyFramework;\
      executorService=java.util.concurrent.ExecutorService;\
      alarmManager=com.ibm.ejs.util.am.AlarmManager; \
      commonServiceFacade=com.ibm.ws.sib.common.service.CommonServiceFacade;\
