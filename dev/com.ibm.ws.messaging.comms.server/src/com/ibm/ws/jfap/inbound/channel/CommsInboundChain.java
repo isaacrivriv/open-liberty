@@ -24,7 +24,6 @@ import com.ibm.websphere.event.EventEngine;
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
 import com.ibm.websphere.ras.annotation.Trivial;
-import com.ibm.ws.jfap.inbound.netty.JmsTCPInitializer;
 import com.ibm.ws.sib.admin.JsConstants;
 import com.ibm.ws.sib.jfapchannel.JFapChannelConstants;
 import com.ibm.ws.sib.utils.ras.SibTr;
@@ -34,20 +33,11 @@ import com.ibm.wsspi.channelfw.exception.ChainException;
 import com.ibm.wsspi.channelfw.exception.ChannelException;
 import com.ibm.wsspi.kernel.service.utils.FrameworkState;
 
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelPipeline;
-import io.openliberty.netty.internal.BootstrapExtended;
-import io.openliberty.netty.internal.ChannelInitializerWrapper;
-import io.openliberty.netty.internal.ConfigConstants;
-import io.openliberty.netty.internal.NettyFramework;
-import io.openliberty.netty.internal.ServerBootstrapExtended;
-import io.openliberty.netty.internal.exception.NettyException;
-
 /**
  * JFAP inbound chain class definition
  * As of now only two instances are possible: InboundBasic and InboundSecure
  */
-public class CommsInboundChain {
+public class CommsInboundChain implements ChainEventListener {
     private static final TraceComponent tc = Tr.register(CommsInboundChain.class, JFapChannelConstants.MSG_GROUP, JFapChannelConstants.MSG_BUNDLE);
 
     private boolean _isSecureChain = false;
@@ -57,12 +47,8 @@ public class CommsInboundChain {
     private final CommsServerServiceFacade _commsServerFacade;
 
     private String _endpointName;
-//    private ChannelFramework _cfw;
-    private NettyFramework _nettyFramework;
-//    private EndPointMgr _endpointMgr;
-    private Channel nettyChannel;
-    
-    private ServerBootstrapExtended bootstrap;
+    private ChannelFramework _cfw;
+    private EndPointMgr _endpointMgr;
 
     //channel names
     private String _tcpName;
@@ -73,8 +59,8 @@ public class CommsInboundChain {
 
     private ChainConfiguration _currentConfig;
 
-//    // will be used to wait for completion of actual stopChain
-//    private final StopWait stopWait = new StopWait();
+    // will be used to wait for completion of actual stopChain
+    private final StopWait stopWait = new StopWait();
 
     enum ChainState {
         UNINITIALIZED(0, "UNINITIALIZED"),
@@ -126,9 +112,9 @@ public class CommsInboundChain {
 
     }
 
-    public void init(String endpointName, NettyFramework nettyFramework) {
-        this._nettyFramework = nettyFramework;
-//        _endpointMgr = cfBundle.getEndpointManager();
+    public void init(String endpointName, CHFWBundle cfBundle) {
+        _cfw = cfBundle.getFramework();
+        _endpointMgr = cfBundle.getEndpointManager();
         _endpointName = endpointName;
 
         if (_isSecureChain) {
@@ -147,9 +133,9 @@ public class CommsInboundChain {
         _isEnabled = enbaled;
     }
 
-//    /**
-//     * stop will get called only from de-activate.
-//     */
+    /**
+     * stop will get called only from de-activate.
+     */
     public void stop() {
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.entry(tc, "stop");
@@ -157,7 +143,13 @@ public class CommsInboundChain {
         //stopchain() first quiesce's(invokes chainQuiesced) depending on the chainQuiesceTimeOut
         //Once the chain is quiesced StopChainTask is initiated.Hence we block until the actual stopChain is invoked
         try {
-        	_nettyFramework.stop(nettyChannel);
+            ChainData cd = _cfw.getChain(_chainName);
+            if (cd != null) {
+                _cfw.stopChain(cd, _cfw.getDefaultChainQuiesceTimeout());
+                stopWait.waitForStop(_cfw.getDefaultChainQuiesceTimeout()); //BLOCK till stopChain actually completes from StopChainTask
+                _cfw.destroyChain(cd);
+                _cfw.removeChain(cd);
+            }
         } catch (Exception e) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                 SibTr.debug(tc, "Failed in successfully cleaning(i.e stopping/destorying/removing) chain: ", e);
@@ -202,7 +194,7 @@ public class CommsInboundChain {
             _currentConfig = newConfig;
 
             //stop the chain
-//            stop();
+            stop();
             if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
                 SibTr.exit(tc, "update");
             return;
@@ -228,18 +220,18 @@ public class CommsInboundChain {
         }
 
         try {
-//            if (validOldConfig) {
-//                //we have good old config means.. chain was started successfully..
-//                //first stop the chain.. it should be harmless if chain is already stopped
-//                stop();
-//            }
+            if (validOldConfig) {
+                //we have good old config means.. chain was started successfully..
+                //first stop the chain.. it should be harmless if chain is already stopped
+                stop();
+            }
 
             // Remove any channels that have to be rebuilt.. 
-//            if (newConfig.tcpChanged(oldConfig))
-//                removeChannel(_tcpName);
-//
-//            if (newConfig.sslChanged(oldConfig))
-//                removeChannel(_sslName);
+            if (newConfig.tcpChanged(oldConfig))
+                removeChannel(_tcpName);
+
+            if (newConfig.sslChanged(oldConfig))
+                removeChannel(_sslName);
 
             //as of now, JFAP options are not exposed.. so no need to touch it.
 
@@ -248,114 +240,69 @@ public class CommsInboundChain {
 
             // define is a simple replace of the old value known to the endpointMgr
             //by defining with Endpoint Manager, Jfap endpoint can be queried from Mbeans
-//            _endpointMgr.defineEndPoint(_endpointName, newConfig.configHost, newConfig.configPort);
+            _endpointMgr.defineEndPoint(_endpointName, newConfig.configHost, newConfig.configPort);
 
-            // Netty implementation
-            
-            Map<String, Object> chanProps = new HashMap<String, Object>();
-            chanProps.putAll(tcpOptions);
-            chanProps.put("endPointName", _endpointName);
-            chanProps.put("hostname", newConfig.configHost);
-            chanProps.put("port", String.valueOf(newConfig.configPort));
-            chanProps.put("ExternalName", _endpointName);//TODO: Change this to an appropriate variable
-            
-            
+            Map<Object, Object> chanProps;
+
+            // TCP Channel
+            ChannelData tcpChannel = _cfw.getChannel(_tcpName);
+            if (tcpChannel == null) {
+                String typeName = (String) tcpOptions.get("type");
+                chanProps = new HashMap<Object, Object>(tcpOptions);
+                chanProps.put("endPointName", _endpointName);
+                chanProps.put("hostname", newConfig.configHost);
+                chanProps.put("port", String.valueOf(newConfig.configPort));
+
+                tcpChannel = _cfw.addChannel(_tcpName, _cfw.lookupFactory(typeName), chanProps);
+            }
+
+            // SSL Channel
+            if (_isSecureChain) {
+                ChannelData sslChannel = _cfw.getChannel(_sslName);
+                if (sslChannel == null) {
+                    sslChannel = _cfw.addChannel(_sslName, _cfw.lookupFactory("SSLChannel"), new HashMap<Object, Object>(sslOptions));
+                }
+            }
+
+            ChannelData jfapChannel = _cfw.getChannel(_jfapName);
+            if (jfapChannel == null)
+                jfapChannel = _cfw.addChannel(_jfapName, _cfw.lookupFactory("JFAPChannel"), null);
+
             final String[] chanList;
             if (_isSecureChain)
                 chanList = new String[] { _tcpName, _sslName, _jfapName };
             else
                 chanList = new String[] { _tcpName, _jfapName };
-            
-            
-            bootstrap = _nettyFramework.createTCPBootstrap(chanProps);
-            
-            bootstrap.childHandler(new JmsTCPInitializer(bootstrap.getBaseInitializer()));
-            
-            
-            // TODO: Could wait to get the channel from the async. For testing this will get started
-            nettyChannel = _nettyFramework.start(bootstrap, newConfig.configHost, newConfig.configPort, future ->{
-            	if(future.isSuccess()) {
-            		if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        SibTr.debug(tc, "JFAP Chain netty successfully started and bound to port: ", newConfig.configPort);
-            			SibTr.debug(tc, "JFAP chain InboundBasicMessaging successfully started and bound to port: ", newConfig.getActivePort());
-            		}
-            		_isChainStarted = true; // TODO: Verify about this variable
-                    newConfig.isValidConfig = true;
-            	}else {
-            		if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-                        SibTr.debug(tc, "JFAP Chain netty did not start succesfully");
-            	}
-            }).channel();
-            // Check trace rather than depend on debug and break points.
-            
-            
-            
-            
-            // Channelfw Implementation
-//            Map<Object, Object> chanProps;
-            // TCP Channel
-//            _nettyFramework.
-//            ChannelData tcpChannel = _cfw.getChannel(_tcpName);
-//            if (tcpChannel == null) {
-//                String typeName = (String) tcpOptions.get("type");
-//                chanProps = new HashMap<Object, Object>(tcpOptions);
-//                chanProps.put("endPointName", _endpointName);
-//                chanProps.put("hostname", newConfig.configHost);
-//                chanProps.put("port", String.valueOf(newConfig.configPort));
-//
-//                tcpChannel = _cfw.addChannel(_tcpName, _cfw.lookupFactory(typeName), chanProps);
-//            }
 
-            // SSL Channel
-//            if (_isSecureChain) {
-//                ChannelData sslChannel = _cfw.getChannel(_sslName);
-//                if (sslChannel == null) {
-//                    sslChannel = _cfw.addChannel(_sslName, _cfw.lookupFactory("SSLChannel"), new HashMap<Object, Object>(sslOptions));
-//                }
-//            }
-//
-//            ChannelData jfapChannel = _cfw.getChannel(_jfapName);
-//            if (jfapChannel == null)
-//                jfapChannel = _cfw.addChannel(_jfapName, _cfw.lookupFactory("JFAPChannel"), null);
-//
-//            final String[] chanList;
-//            if (_isSecureChain)
-//                chanList = new String[] { _tcpName, _sslName, _jfapName };
-//            else
-//                chanList = new String[] { _tcpName, _jfapName };
-//
-//            ChainData cd = _cfw.addChain(_chainName, FlowType.INBOUND, chanList);
-//            cd.setEnabled(true);
-//            //add the chainevenlistener to the cfw for chain notification
-//            _cfw.addChainEventListener(this, _chainName);
-//
-//            _cfw.startChain(cd);
+            ChainData cd = _cfw.addChain(_chainName, FlowType.INBOUND, chanList);
+            cd.setEnabled(true);
+            //add the chainevenlistener to the cfw for chain notification
+            _cfw.addChainEventListener(this, _chainName);
+
+            _cfw.startChain(cd);
 
             // get listening chains (non-null if chains started successfully)
-//            int jmsActivePort = -1;
-//
-//            try {
-//                jmsActivePort = _cfw.getListeningPort(_chainName);
-//            } catch (ChainException e) {
-//                _isChainStarted = false;
-//                jmsActivePort = -1;
-//                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-//                    SibTr.debug(tc, "JFAP chain InboundBasicMessaging failed in obtaining Listening port from ChannelFrameWork", e);
-//                if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//                    SibTr.exit(tc, "update");
-//                return;
-//            }
+            int jmsActivePort = -1;
+
+            try {
+                jmsActivePort = _cfw.getListeningPort(_chainName);
+            } catch (ChainException e) {
+                _isChainStarted = false;
+                jmsActivePort = -1;
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+                    SibTr.debug(tc, "JFAP chain InboundBasicMessaging failed in obtaining Listening port from ChannelFrameWork", e);
+                if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+                    SibTr.exit(tc, "update");
+                return;
+            }
 
             //Chain successfully started and bound to port. Channel Framework logs to System.out. So just add to trace
-//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-//                SibTr.debug(tc, "JFAP chain InboundBasicMessaging successfully started and bound to port: ", jmsActivePort);
-
-//            _isChainStarted = true;
-//            newConfig.isValidConfig = true;
-
-        } catch (NettyException e) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-            	SibTr.debug(this, tc, "Netty Exception occured in starting the chain  " + newConfig);
+                SibTr.debug(tc, "JFAP chain InboundBasicMessaging successfully started and bound to port: ", jmsActivePort);
+
+            _isChainStarted = true;
+            newConfig.isValidConfig = true;
+
         } catch (Exception e) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 SibTr.debug(this, tc, "Problem in starting the chain  " + newConfig);
@@ -366,33 +313,32 @@ public class CommsInboundChain {
           SibTr.exit(tc, "update");
     }
 
-//    /**
-//     * Removes channel from cfw.
-//     */
-//    private void removeChannel(String name) {
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.entry(tc, "removeChannel", name);
-//        // Neither of the thrown exceptions are permanent failures: 
-//        // they usually indicate that we're the victim of a race.
-//        // If the CFW is also tearing down the chain at the same time 
-//        // (for example, the SSL feature was removed), then this could
-//        // fail.
-//        try {
-//            _cfw.removeChannel(name);
-//        } catch (ChannelException e) {
-//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-//                SibTr.debug(this, tc, "Error removing channel " + name, e);
-//            }
-//        } catch (ChainException e) {
-//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-//                SibTr.debug(this, tc, "Error removing channel " + name, e);
-//            }
-//        }
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.exit(tc, "removeChannel");
-//    }
-    
-    
+    /**
+     * Removes channel from cfw.
+     */
+    private void removeChannel(String name) {
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.entry(tc, "removeChannel", name);
+        // Neither of the thrown exceptions are permanent failures: 
+        // they usually indicate that we're the victim of a race.
+        // If the CFW is also tearing down the chain at the same time 
+        // (for example, the SSL feature was removed), then this could
+        // fail.
+        try {
+            _cfw.removeChannel(name);
+        } catch (ChannelException e) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                SibTr.debug(this, tc, "Error removing channel " + name, e);
+            }
+        } catch (ChainException e) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                SibTr.debug(this, tc, "Error removing channel " + name, e);
+            }
+        }
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.exit(tc, "removeChannel");
+    }
+
     private final class ChainConfiguration {
         final int configPort;
         final String configHost;
@@ -418,17 +364,16 @@ public class CommsInboundChain {
          * @return returns listening port for the chain. if chain has some problem, returns -1
          */
         public int getActivePort() {
-        	return configPort;
-//            if (configPort < 0)
-//                return -1;
-//            if (activePort == -1) {
-//                try {
-//                    activePort = _cfw.getListeningPort(_chainName);
-//                } catch (ChainException ce) {
-//                    activePort = -1;
-//                }
-//            }
-//            return activePort;
+            if (configPort < 0)
+                return -1;
+            if (activePort == -1) {
+                try {
+                    activePort = _cfw.getListeningPort(_chainName);
+                } catch (ChainException ce) {
+                    activePort = -1;
+                }
+            }
+            return activePort;
         }
 
         /**
@@ -495,30 +440,31 @@ public class CommsInboundChain {
         }
     }
 
-//    /*
-//     * (non-Javadoc)
-//     * 
-//     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainInitialized(com.ibm.websphere.channelfw.ChainData)
-//     */
-//    @Override
-//    public void chainInitialized(ChainData chainData) {
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.entry(tc, "chainInitialized", chainData);
-//
-//        chainState.set(ChainState.INITIALIZED.val);
-//
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.exit(tc, "chainInitialized");
-//    }
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainInitialized(com.ibm.websphere.channelfw.ChainData)
+     */
+    @Override
+    public void chainInitialized(ChainData chainData) {
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.entry(tc, "chainInitialized", chainData);
+
+        chainState.set(ChainState.INITIALIZED.val);
+
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.exit(tc, "chainInitialized");
+    }
 
     /*
      * (non-Javadoc)
      * 
      * @see com.ibm.wsspi.channelfw.ChainEventListener#chainStarted(com.ibm.websphere.channelfw.ChainData)
      */
-    public void chainStarted() {
+    @Override
+    public void chainStarted(ChainData chainData) {
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-            SibTr.entry(tc, "chainStarted");
+            SibTr.entry(tc, "chainStarted", chainData);
 
         chainState.set(ChainState.STARTED.val);
 
@@ -526,141 +472,140 @@ public class CommsInboundChain {
             SibTr.exit(tc, "chainStarted");
 
     }
-    
 
-//    /*
-//     * (non-Javadoc)
-//     * 
-//     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainStopped(com.ibm.websphere.channelfw.ChainData)
-//     */
-//    @Override
-//    public void chainStopped(ChainData chainData) {
-//
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.entry(tc, "chainStopped", chainData);
-//
-//        chainState.set(ChainState.STOPPED.val);
-//
-//        // Wake up anything waiting for the chain to stop
-//        // (see the update method for one example)
-//        stopWait.notifyStopped();
-//
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.exit(tc, "chainStopped");
-//    }
-//
-//    /*
-//     * Before the chain is stopped/destroyed we send notification to clients so that clients
-//     * can close connections gracefully
-//     * 
-//     * This method can not be synchronized (deadlock with update/stop).
-//     * Rely on CFW synchronization of chain operations.
-//     * 
-//     * (non-Javadoc)
-//     * 
-//     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainQuiesced(com.ibm.websphere.channelfw.ChainData)
-//     */
-//    @Override
-//    public void chainQuiesced(ChainData chainData) {
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.entry(tc, "chainQuiesced", chainData);
-//
-//        chainState.set(ChainState.QUIESCED.val);
-//
-//        //First stop any MP connections which are established through COMMS 
-//        //stopping connections is Non-blocking
-//        try {
-//            if (this._isSecureChain)
-//                _commsServerFacade.closeViaCommsMPConnections(JsConstants.ME_STOP_COMMS_SSL_CONNECTIONS);
-//            else
-//                _commsServerFacade.closeViaCommsMPConnections(JsConstants.ME_STOP_COMMS_CONNECTIONS);
-//        } catch (Exception e) {
-//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
-//                SibTr.debug(tc, "Failed in stopping MP connections which are establised through COMMS: ", e);
-//        }
-//
-//        // no current connections, notify the final stop can happen now
-//        signalNoConnections();
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.exit(tc, "chainQuiesced");
-//    }
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainStopped(com.ibm.websphere.channelfw.ChainData)
+     */
+    @Override
+    public void chainStopped(ChainData chainData) {
 
-//    /**
-//     * Send an event to the channel framework that there are no more active
-//     * connections on this quiesced channel instance. This will allow an early
-//     * final chain stop instead of waiting the full quiesce timeout length.
-//     */
-//    private void signalNoConnections() {
-//        EventEngine events = _commsServerFacade.getEventEngine();
-//        if (null == events) {
-//            if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
-//                SibTr.event(tc, "Unable to send event, missing service");
-//            }
-//            return;
-//        }
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
-//            SibTr.event(tc, "No active connections, sending stop chain event");
-//        }
-//        Event event = events.createEvent(ChannelFramework.EVENT_STOPCHAIN);
-//        event.setProperty(ChannelFramework.EVENT_CHANNELNAME, _cfw.getChannel(_jfapName).getExternalName());
-//        events.postEvent(event);
-//    }
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.entry(tc, "chainStopped", chainData);
 
-//    /*
-//     * (non-Javadoc)
-//     * 
-//     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainDestroyed(com.ibm.websphere.channelfw.ChainData)
-//     */
-//    @Override
-//    public void chainDestroyed(ChainData chainData) {
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.entry(tc, "chainDestroyed", chainData);
-//
-//        chainState.getAndSet(ChainState.DESTROYED.val);
-//
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.exit(tc, "chainDestroyed");
-//    }
-//
-//    /*
-//     * (non-Javadoc)
-//     * 
-//     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainUpdated(com.ibm.websphere.channelfw.ChainData)
-//     */
-//    @Override
-//    public void chainUpdated(ChainData chainData) {
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.entry(tc, "chainUpdated", chainData);
-//        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-//            SibTr.exit(tc, "chainUpdated");
-//
-//    }
+        chainState.set(ChainState.STOPPED.val);
 
-//    private class StopWait {
-//
-//        synchronized void waitForStop(long timeout) {
-//            // wait for the configured timeout (the parameter) + a smidgen of time
-//            // to allow the cfw to stop the chain after that configured quiesce 
-//            // timeout expires
-//            long interval = timeout + 2345L;
-//            long waited = 0;
-//
-//            // If, as far as we know, the chain hasn't been stopped yet, wait for 
-//            // the stop notification for at most the timeout amount of time.
-//            while (chainState.get() > ChainState.STOPPED.val && waited < interval) {
-//                long start = System.nanoTime();
-//                try {
-//                    wait(interval - waited);
-//                } catch (InterruptedException ie) {
-//                    // ignore
-//                }
-//                waited += System.nanoTime() - start;
-//            }
-//        }
-//
-//        synchronized void notifyStopped() {
-//            notifyAll();
-//        }
-//    }
+        // Wake up anything waiting for the chain to stop
+        // (see the update method for one example)
+        stopWait.notifyStopped();
+
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.exit(tc, "chainStopped");
+    }
+
+    /*
+     * Before the chain is stopped/destroyed we send notification to clients so that clients
+     * can close connections gracefully
+     * 
+     * This method can not be synchronized (deadlock with update/stop).
+     * Rely on CFW synchronization of chain operations.
+     * 
+     * (non-Javadoc)
+     * 
+     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainQuiesced(com.ibm.websphere.channelfw.ChainData)
+     */
+    @Override
+    public void chainQuiesced(ChainData chainData) {
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.entry(tc, "chainQuiesced", chainData);
+
+        chainState.set(ChainState.QUIESCED.val);
+
+        //First stop any MP connections which are established through COMMS 
+        //stopping connections is Non-blocking
+        try {
+            if (this._isSecureChain)
+                _commsServerFacade.closeViaCommsMPConnections(JsConstants.ME_STOP_COMMS_SSL_CONNECTIONS);
+            else
+                _commsServerFacade.closeViaCommsMPConnections(JsConstants.ME_STOP_COMMS_CONNECTIONS);
+        } catch (Exception e) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+                SibTr.debug(tc, "Failed in stopping MP connections which are establised through COMMS: ", e);
+        }
+
+        // no current connections, notify the final stop can happen now
+        signalNoConnections();
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.exit(tc, "chainQuiesced");
+    }
+
+    /**
+     * Send an event to the channel framework that there are no more active
+     * connections on this quiesced channel instance. This will allow an early
+     * final chain stop instead of waiting the full quiesce timeout length.
+     */
+    private void signalNoConnections() {
+        EventEngine events = _commsServerFacade.getEventEngine();
+        if (null == events) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
+                SibTr.event(tc, "Unable to send event, missing service");
+            }
+            return;
+        }
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
+            SibTr.event(tc, "No active connections, sending stop chain event");
+        }
+        Event event = events.createEvent(ChannelFramework.EVENT_STOPCHAIN);
+        event.setProperty(ChannelFramework.EVENT_CHANNELNAME, _cfw.getChannel(_jfapName).getExternalName());
+        events.postEvent(event);
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainDestroyed(com.ibm.websphere.channelfw.ChainData)
+     */
+    @Override
+    public void chainDestroyed(ChainData chainData) {
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.entry(tc, "chainDestroyed", chainData);
+
+        chainState.getAndSet(ChainState.DESTROYED.val);
+
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.exit(tc, "chainDestroyed");
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.ibm.wsspi.channelfw.ChainEventListener#chainUpdated(com.ibm.websphere.channelfw.ChainData)
+     */
+    @Override
+    public void chainUpdated(ChainData chainData) {
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.entry(tc, "chainUpdated", chainData);
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+            SibTr.exit(tc, "chainUpdated");
+
+    }
+
+    private class StopWait {
+
+        synchronized void waitForStop(long timeout) {
+            // wait for the configured timeout (the parameter) + a smidgen of time
+            // to allow the cfw to stop the chain after that configured quiesce 
+            // timeout expires
+            long interval = timeout + 2345L;
+            long waited = 0;
+
+            // If, as far as we know, the chain hasn't been stopped yet, wait for 
+            // the stop notification for at most the timeout amount of time.
+            while (chainState.get() > ChainState.STOPPED.val && waited < interval) {
+                long start = System.nanoTime();
+                try {
+                    wait(interval - waited);
+                } catch (InterruptedException ie) {
+                    // ignore
+                }
+                waited += System.nanoTime() - start;
+            }
+        }
+
+        synchronized void notifyStopped() {
+            notifyAll();
+        }
+    }
 
 }

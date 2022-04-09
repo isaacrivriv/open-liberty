@@ -46,15 +46,11 @@ import com.ibm.wsspi.channelfw.base.InboundApplicationLink;
 import com.ibm.wsspi.channelfw.exception.ChannelException;
 import com.ibm.wsspi.sib.core.exception.SIConnectionLostException;
 
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-
 /**
  * Object that represents a single inbound connection. This is required to
- * participate as a channel in the Channel Framework. TODO: Verify InboundApplicationLink change to netty
+ * participate as a channel in the Channel Framework.
  */
-public class JFapInboundConnLink extends InboundApplicationLink implements MetaDataProvider, ChannelFutureListener {
+public class JFapInboundConnLink extends InboundApplicationLink implements MetaDataProvider {
     private static final TraceComponent tc = SibTr.register(JFapInboundConnLink.class,
                                                             JFapChannelConstants.MSG_GROUP,
                                                             JFapChannelConstants.MSG_BUNDLE);
@@ -78,7 +74,7 @@ public class JFapInboundConnLink extends InboundApplicationLink implements MetaD
      */
     public JFapInboundConnLink(VirtualConnection vc,
                                ChannelFactoryData channelFactoryData,
-                               ChannelData cc, Channel chan) // F177053, D196678.10.1
+                               ChannelData cc) // F177053, D196678.10.1
     {
         super(); // F177053
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
@@ -102,7 +98,7 @@ public class JFapInboundConnLink extends InboundApplicationLink implements MetaD
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                     SibTr.debug(this, tc, "channelName=" + channelName + " chainData=" + chainDataArray[0]);
 
-                metaData = new ConversationMetaDataImpl(chainDataArray[0], this ); // F206161.5
+                metaData = new ConversationMetaDataImpl(chainDataArray[0], this); // F206161.5
             } else if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                 SibTr.debug(this, tc, "cannot find a running chain for channel: " + channelName);
         } catch (ChannelException e) {
@@ -355,7 +351,7 @@ public class JFapInboundConnLink extends InboundApplicationLink implements MetaD
             SibTr.entry(this, tc, "close", new Object[] { vc, e });
         if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled() && (e != null))
             SibTr.exception(this, tc, e);
-//        super.close(vc, e);
+        super.close(vc, e);
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.exit(this, tc, "close");
     }
@@ -391,14 +387,4 @@ public class JFapInboundConnLink extends InboundApplicationLink implements MetaD
         return metaData;
     }
     // end D196678.10.1
-
-	@Override
-	public void operationComplete(ChannelFuture arg0) throws Exception {
-		// TODO Auto-generated method stub
-		if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-            SibTr.entry(this, tc, "operationComplete");
-        if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
-            SibTr.exit(this, tc, "operationComplete");
-		
-	}
 }

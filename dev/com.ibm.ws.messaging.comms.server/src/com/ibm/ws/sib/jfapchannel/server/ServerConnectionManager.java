@@ -226,7 +226,7 @@ public abstract class ServerConnectionManager
      * @param conversationReceiveListener
      * @return Conversation
      * @throws SIResourceException
-     *///TODO: Verify CFEndpoint
+     */
     public abstract Conversation connect(CFEndPoint wlmEndPoint, // F189000
                                          ConversationReceiveListener conversationReceiveListener)
                     throws SIResourceException;

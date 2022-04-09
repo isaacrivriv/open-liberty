@@ -47,7 +47,8 @@ com.ibm.ws.sib.jfapchannel.richclient.threadpool.impl,\
 com.ibm.ws.sib.jfapchannel.threadpool,\
 com.ibm.ws.sib.jfapchannel,\
 com.ibm.ws.sib.jfapchannel.buffer,\
-com.ibm.ws.sib.jfapchannel.richclient.buffer.impl
+com.ibm.ws.sib.jfapchannel.richclient.buffer.impl,\
+com.ibm.ws.netty.jfapchannel
 
 
 Service-Component: \
@@ -55,6 +56,7 @@ Service-Component: \
      implementation:=com.ibm.ws.sib.jfapchannel.impl.CommsClientServiceFacade;\
      provide:=com.ibm.ws.sib.comms.CommsClientServiceFacadeInterface; \
      nettyBundle=io.openliberty.netty.internal.NettyFramework;\
+     chfwBundle=com.ibm.websphere.channelfw.osgi.CHFWBundle;\
      executorService=java.util.concurrent.ExecutorService;\
      alarmManager=com.ibm.ejs.util.am.AlarmManager; \
      commonServiceFacade=com.ibm.ws.sib.common.service.CommonServiceFacade;\
