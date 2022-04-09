@@ -33,6 +33,7 @@ import com.ibm.wsspi.bytebuffer.WsByteBufferPoolManager;
 import com.ibm.wsspi.channelfw.ChannelFramework;
 import com.ibm.wsspi.channelfw.ChannelFrameworkFactory;
 import com.ibm.wsspi.kernel.service.utils.AtomicServiceReference;
+import com.ibm.wsspi.kernel.service.utils.MetatypeUtils;
 import com.ibm.wsspi.sib.core.SelectionCriteriaFactory;
 
 import io.openliberty.netty.internal.NettyFramework;
@@ -49,7 +50,7 @@ import io.openliberty.netty.internal.NettyFramework;
 public class CommsClientServiceFacade implements CommsClientServiceFacadeInterface {
     private static final TraceComponent tc = Tr.register(CommsClientServiceFacade.class, JFapChannelConstants.MSG_GROUP, JFapChannelConstants.MSG_BUNDLE);
 
-//    private static final AtomicServiceReference<CHFWBundle> chfwRef = new AtomicServiceReference<CHFWBundle>("chfwBundle");
+    private static final AtomicServiceReference<CHFWBundle> chfwRef = new AtomicServiceReference<CHFWBundle>("chfwBundle");
     private static final AtomicServiceReference<NettyFramework> _nettyRef = new AtomicServiceReference<NettyFramework>("nettyBundle");
     private static final AtomicServiceReference<ExecutorService> exeServiceRef = new AtomicServiceReference<ExecutorService>("executorService");
     private static final AtomicServiceReference<CommonServiceFacade> _commonServiceFacadeRef = new AtomicServiceReference<CommonServiceFacade>("commonServiceFacade");
@@ -65,13 +66,18 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
     public void activate(Map<String, Object> properties, ComponentContext context) {
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.entry(tc, "activate");
-//        chfwRef.activate(context);
-        _nettyRef.activate(context);
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+            SibTr.debug(tc, "activate", "Using Netty: "+useNetty());
+        if(useNetty())
+        	_nettyRef.activate(context);
+        else {
+        	chfwRef.activate(context);
+        	getChannelFramework().registerFactory("JFapChannelOutbound", JFapChannelFactory.class);
+        }
         _commonServiceFacadeRef.activate(context);
         alarmManagerRef.activate(context);
         exeServiceRef.activate(context);
 
-//        getChannelFramewrok().registerFactory("JFapChannelOutbound", JFapChannelFactory.class);
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
             SibTr.exit(tc, "activate");
@@ -84,7 +90,7 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
      * @param reason int representation of reason the component is stopping
      */
     protected void deactivate(ComponentContext context) {
-//        chfwRef.deactivate(context);
+        chfwRef.deactivate(context);
         _nettyRef.deactivate(context);
         _commonServiceFacadeRef.deactivate(context);
         alarmManagerRef.deactivate(context);
@@ -100,13 +106,13 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
      * @param ref
      *            reference to the service
      */
-//    protected void setChfwBundle(ServiceReference<CHFWBundle> ref) {
-//        chfwRef.setReference(ref);
-//    }
-//
-//    protected void unsetChfwBundle(ServiceReference<CHFWBundle> ref) {
-//        chfwRef.unsetReference(ref);
-//    }
+    protected void setChfwBundle(ServiceReference<CHFWBundle> ref) {
+        chfwRef.setReference(ref);
+    }
+
+    protected void unsetChfwBundle(ServiceReference<CHFWBundle> ref) {
+        chfwRef.unsetReference(ref);
+    }
     
     protected void setNettyBundle(ServiceReference<NettyFramework> ref) {
         _nettyRef.setReference(ref);
@@ -117,6 +123,7 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
     }
 
     public static NettyFramework getNettyBundle() {
+    	if(!useNetty()) throw new IllegalAccessError("Tried to getNetty with Netty turned off");
         return _nettyRef.getService();
     }
 
@@ -175,12 +182,14 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
         return alarmManagerRef.getService();
     }
 
-//    public static ChannelFramework getChannelFramewrok() {
-//        if (null == chfwRef.getService()) {
-//            return ChannelFrameworkFactory.getChannelFramework();
-//        }
-//        return chfwRef.getService().getFramework();
-//    }
+    public static ChannelFramework getChannelFramework() {
+    	// TODO Verify this later on
+    	if(useNetty()) throw new IllegalAccessError("Tried to getChannelFW with Netty turned on");
+        if (null == chfwRef.getService()) {
+            return ChannelFrameworkFactory.getChannelFramework();
+        }
+        return chfwRef.getService().getFramework();
+    }
 
     public static ExecutorService getExecutorService() {
         return exeServiceRef.getService();
@@ -191,12 +200,12 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
      * 
      * @return WsByteBufferPoolManager
      */
-//    public static WsByteBufferPoolManager getBufferPoolManager() {
-//        if (null == chfwRef.getService()) {
-//            return ChannelFrameworkFactory.getBufferManager();
-//        }
-//        return chfwRef.getService().getBufferManager();
-//    }
+    public static WsByteBufferPoolManager getBufferPoolManager() {
+        if (null == chfwRef.getService()) {
+            return ChannelFrameworkFactory.getBufferManager();
+        }
+        return chfwRef.getService().getBufferManager();
+    }
 
     //Export implementations of this bundles through CommsClientServiceFacadeInterface
 
@@ -211,5 +220,14 @@ public class CommsClientServiceFacade implements CommsClientServiceFacadeInterfa
         }
         return _ClientConnectionFactoryInstance;
     }
+    
+    /**
+	 * Query if Netty has been enabled for this endpoint
+	 * @return true if Netty should be used for this endpoint
+	 */
+	public static boolean useNetty() {
+		// TODO: Return true for now until we figure out how to 
+	    return true;
+	}
 
 }

@@ -53,13 +53,12 @@ public class CFWNetworkConnection implements NetworkConnection
    }
 
    /** The virtual connection */
-   private VirtualConnection vc = null; // More analogous to Netty Channel. Bootstrap is more blueprint to netty channel
+   private VirtualConnection vc = null;
 
    /**
     * @param vc
     */
    public CFWNetworkConnection(VirtualConnection vc)
-//   public CFWNetworkConnection()
    {
       if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled()) SibTr.entry(this, tc, "<init>", vc);
       this.vc = vc;
@@ -155,11 +154,11 @@ public class CFWNetworkConnection implements NetworkConnection
       };
 
       // Get the underlying JFapAddress and update the virtual connection state map
-//      JFapAddress jfapAddress = (JFapAddress)target;
-//      if ((jfapAddress != null) && (jfapAddress.getAttachType() == Conversation.CLIENT))
-//         vc.getStateMap().put(OutboundProtocol.PROTOCOL, "BUS_CLIENT");
-//      else
-//         vc.getStateMap().put(OutboundProtocol.PROTOCOL, "BUS_TO_BUS");
+      JFapAddress jfapAddress = (JFapAddress)target;
+      if ((jfapAddress != null) && (jfapAddress.getAttachType() == Conversation.CLIENT))
+         vc.getStateMap().put(OutboundProtocol.PROTOCOL, "BUS_CLIENT");
+      else
+         vc.getStateMap().put(OutboundProtocol.PROTOCOL, "BUS_TO_BUS");
 
       // Check to see if the channel framework is stopped. If it is, then it is not safe to call the 
       // channel framework because it may not drive the callback. Note that the channel framework could 
