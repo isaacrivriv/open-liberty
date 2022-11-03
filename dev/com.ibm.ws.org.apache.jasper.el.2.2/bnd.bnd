@@ -14,11 +14,12 @@ bVersion=1.0
 Bundle-Name: Apache EL
 Bundle-SymbolicName: com.ibm.ws.org.apache.jasper.el.2.2
 Bundle-Description: Apache EL, version 2.2
+Implementation-Version: 2.2.0
 
-Export-Package: org.apache.el;thread-context=true, \
-   org.apache.el.lang;thread-context=true, \
-   org.apache.el.parser, \
-   org.apache.el.util
+Export-Package: org.apache.el;thread-context=true;version=${Implementation-Version}, \
+   org.apache.el.lang;thread-context=true;version=${Implementation-Version}, \
+   org.apache.el.parser;version=${Implementation-Version}, \
+   org.apache.el.util;version=${Implementation-Version}
 
 instrument.disabled: true
 

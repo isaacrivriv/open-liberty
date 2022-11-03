@@ -14,12 +14,13 @@ bVersion=3.0
 Bundle-Name: WAS EL 3.0
 Bundle-SymbolicName: com.ibm.ws.org.apache.jasper.el.3.0
 Bundle-Description: WAS EL 3.0, Version=${bVersion}
+Implementation-Version: 3.0.0
 
-Export-Package: org.apache.el;thread-context=true, \
-   org.apache.el.lang;thread-context=true, \
-   org.apache.el.parser, \
-   org.apache.el.util, \
-   org.apache.el.stream
+Export-Package: org.apache.el;thread-context=true;version=${Implementation-Version}, \
+   org.apache.el.lang;thread-context=true;version=${Implementation-Version}, \
+   org.apache.el.parser;version=${Implementation-Version}, \
+   org.apache.el.util;version=${Implementation-Version}, \
+   org.apache.el.stream;version=${Implementation-Version}
 
 Private-Package: org.apache.el.*
 
