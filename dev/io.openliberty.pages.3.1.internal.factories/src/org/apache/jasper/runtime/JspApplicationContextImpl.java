@@ -25,6 +25,8 @@
 //
 package org.apache.jasper.runtime;
 
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -56,7 +58,7 @@ public class JspApplicationContextImpl implements JspApplicationContext {
 
     // PI31922 start
     protected final ExpressionFactory expressionFactory;
-    private final static ExpressionFactory staticExpressionFactory = ExpressionFactory.newInstance();
+    private final static ExpressionFactory staticExpressionFactory = System.getSecurityManager() == null ? ExpressionFactory.newInstance() : AccessController.doPrivileged(new PrivilegedGetExpressionFactory());
     // PI31922 end
 
     private final List<ELContextListener> contextListeners = new ArrayList<ELContextListener>();
@@ -160,6 +162,13 @@ public class JspApplicationContextImpl implements JspApplicationContext {
     @Override
     public ExpressionFactory getExpressionFactory() {
         return expressionFactory;
+    }
+
+    private static class PrivilegedGetExpressionFactory implements PrivilegedAction<ExpressionFactory> {
+        @Override
+        public ExpressionFactory run() {
+            return ExpressionFactory.newInstance();
+        }
     }
 
 }
