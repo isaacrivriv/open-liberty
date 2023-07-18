@@ -4,7 +4,8 @@ WLP-DisableAllFeatures-OnConflict: false
 IBM-SPI-Package: com.ibm.wsspi.http, \
 com.ibm.wsspi.http.ee8
 Subsystem-Version: 1.0
--features=com.ibm.websphere.appserver.channelfw-1.0
+-features=com.ibm.websphere.appserver.channelfw-1.0, \
+  io.openliberty.netty.internal-1.0
 -bundles=com.ibm.ws.transport.http
 -jars=com.ibm.websphere.appserver.spi.httptransport; location:=dev/spi/ibm/
 -files=dev/spi/ibm/javadoc/com.ibm.websphere.appserver.spi.httptransport_4.2-javadoc.zip

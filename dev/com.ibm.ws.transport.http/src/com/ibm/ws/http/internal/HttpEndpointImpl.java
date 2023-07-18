@@ -69,6 +69,8 @@ import com.ibm.wsspi.kernel.service.utils.OnErrorUtil.OnError;
 
 import io.openliberty.checkpoint.spi.CheckpointHook;
 import io.openliberty.checkpoint.spi.CheckpointPhase;
+import io.openliberty.netty.internal.NettyFramework;
+import io.openliberty.netty.internal.tls.NettyTlsProvider;
 
 @Component(configurationPid = "com.ibm.ws.http",
            configurationPolicy = ConfigurationPolicy.REQUIRE,
@@ -103,6 +105,8 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
 
     /** Required, static Channel framework reference */
     private CHFWBundle chfw = null;
+    private NettyFramework nettyBundle = null;
+    private NettyTlsProvider nettyTlsProvider;
 
     /** Required, dynamic tcpOptions: unmodifiable map */
     private volatile ChannelConfiguration tcpOptions = null;
@@ -834,6 +838,49 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
     public Map<String, Object> getHeadersConfig() {
         ChannelConfiguration c = headersConfig;
         return c == null ? null : c.getConfiguration();
+    }
+
+    /**
+     * DS method for setting the required channel framework service.
+     *
+     * @param bundle
+     */
+    @Reference(name = "nettyBundle")
+    protected void setNettyBundle(NettyFramework bundle) {
+        nettyBundle = bundle;
+    }
+
+    /**
+     * This is a required static reference, this won't
+     * be called until the component has been deactivated
+     *
+     * @param bundle CHFWBundle instance to unset
+     */
+    protected void unsetNettyBundle(NettyFramework bundle) {
+    }
+
+    protected NettyFramework getNettyBundle() {
+        return nettyBundle;
+    }
+
+    @Reference(name = "nettyTlsProvider", cardinality = ReferenceCardinality.OPTIONAL, policyOption = ReferencePolicyOption.GREEDY, unbind = "unbindTlsProviderService")
+    void bindNettyTlsProvider(NettyTlsProvider tlsProvider) {
+        if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
+            Tr.event(this, tc, "enable TLS provider ", tlsProvider);
+        }
+        this.nettyTlsProvider = tlsProvider;
+
+        if (endpointConfig != null) {
+            // If this is post-activate, drive the update action
+            performAction(updateAction);
+        }
+    }
+
+    void unbindTlsProviderService(NettyTlsProvider oldService) {
+    }
+
+    public NettyTlsProvider getNettyTlsProvider() {
+        return nettyTlsProvider;
     }
 
     /**

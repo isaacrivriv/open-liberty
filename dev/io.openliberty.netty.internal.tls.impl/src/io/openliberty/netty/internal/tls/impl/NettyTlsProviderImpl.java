@@ -9,6 +9,8 @@
  *******************************************************************************/
 package io.openliberty.netty.internal.tls.impl;
 
+import static io.netty.handler.codec.http2.Http2SecurityUtil.CIPHERS;
+
 import java.security.AccessController;
 import java.security.PrivilegedExceptionAction;
 import java.util.*;
@@ -27,8 +29,11 @@ import com.ibm.websphere.ras.TraceComponent;
 import com.ibm.websphere.ssl.*;
 
 import io.netty.handler.ssl.*;
+import io.netty.handler.ssl.ApplicationProtocolConfig.Protocol;
+import io.netty.handler.ssl.ApplicationProtocolConfig.SelectedListenerFailureBehavior;
+import io.netty.handler.ssl.ApplicationProtocolConfig.SelectorFailureBehavior;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 import io.openliberty.netty.internal.tls.NettyTlsProvider;
-import io.netty.handler.ssl.SslContext;
 
 /**
  * Creates {@link io.netty.handler.ssl.SslContext} objects via
@@ -151,8 +156,15 @@ public class NettyTlsProviderImpl implements NettyTlsProvider {
             Tr.debug(tc, "getInboundSSLContext SSLContext: " + jdkContext);
         }
         try {
-            SslContext nettyContext = new JdkSslContext(jdkContext, false, null, SupportedCipherSuiteFilter.INSTANCE,
-                    null, ClientAuth.OPTIONAL, null, false);
+//            SslContext nettyContext = new JdkSslContext(jdkContext, false, null, SupportedCipherSuiteFilter.INSTANCE,
+//                    null, ClientAuth.OPTIONAL, null, false);
+            ApplicationProtocolConfig apn = new ApplicationProtocolConfig(Protocol.ALPN,
+                            // NO_ADVERTISE is currently the only mode supported by both OpenSsl and JDK providers.
+                            SelectorFailureBehavior.NO_ADVERTISE,
+                            // ACCEPT is currently the only mode supported by both OpenSsl and JDK providers.
+                            SelectedListenerFailureBehavior.ACCEPT, ApplicationProtocolNames.HTTP_2);
+            SslContext nettyContext = new JdkSslContext(jdkContext, false, CIPHERS, SupportedCipherSuiteFilter.INSTANCE,
+                    apn, ClientAuth.OPTIONAL, null, false);
             return nettyContext;
         } catch (Exception e) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isWarningEnabled()) {

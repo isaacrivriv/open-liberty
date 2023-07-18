@@ -14,6 +14,8 @@ package com.ibm.ws.http.internal;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.osgi.framework.Constants;
@@ -40,6 +42,35 @@ import com.ibm.wsspi.channelfw.exception.InvalidRuntimeStateException;
 import com.ibm.wsspi.kernel.service.utils.FrameworkState;
 import com.ibm.wsspi.kernel.service.utils.MetatypeUtils;
 import com.ibm.wsspi.kernel.service.utils.OnErrorUtil.OnError;
+
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.SimpleUserEventChannelHandler;
+import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.HttpServerUpgradeHandler;
+import io.netty.handler.codec.http.HttpServerUpgradeHandler.UpgradeCodec;
+import io.netty.handler.codec.http.HttpServerUpgradeHandler.UpgradeCodecFactory;
+import io.netty.handler.codec.http.HttpServerUpgradeHandler.UpgradeEvent;
+import io.netty.handler.codec.http2.CleartextHttp2ServerUpgradeHandler;
+import io.netty.handler.codec.http2.CleartextHttp2ServerUpgradeHandler.PriorKnowledgeUpgradeEvent;
+import io.netty.handler.codec.http2.DefaultHttp2Connection;
+import io.netty.handler.codec.http2.Http2CodecUtil;
+import io.netty.handler.codec.http2.Http2ServerUpgradeCodec;
+import io.netty.handler.codec.http2.HttpConversionUtil;
+import io.netty.handler.codec.http2.HttpToHttp2ConnectionHandlerBuilder;
+import io.netty.handler.codec.http2.InboundHttp2ToHttpAdapter;
+import io.netty.handler.codec.http2.InboundHttp2ToHttpAdapterBuilder;
+import io.netty.handler.ssl.SslContext;
+import io.netty.util.AsciiString;
+import io.netty.util.ReferenceCountUtil;
+import io.openliberty.netty.internal.ChannelInitializerWrapper;
+import io.openliberty.netty.internal.NettyFramework;
+import io.openliberty.netty.internal.ServerBootstrapExtended;
+import io.openliberty.netty.internal.exception.NettyException;
+import io.openliberty.netty.internal.tls.NettyTlsProvider;
 
 /**
  * Encapsulation of steps for starting/stopping an http chain in a controlled/predictable
@@ -89,6 +120,8 @@ public class HttpChain implements ChainEventListener {
     private final HttpEndpointImpl owner;
     private final boolean isHttps;
 
+    private SslContext context;
+
     private String endpointName;
     private String tcpName;
     private String sslName;
@@ -96,7 +129,10 @@ public class HttpChain implements ChainEventListener {
     private String dispatcherName;
     private String chainName;
     private ChannelFramework cfw;
+    private NettyFramework nettyBundle;
     private EndPointMgr endpointMgr;
+
+    private FutureTask<ChannelFuture> channelFuture;
 
     /**
      * The state of the chain according to values from {@link ChainState}.
@@ -141,6 +177,7 @@ public class HttpChain implements ChainEventListener {
         final String root = endpointId + (isHttps ? "-ssl" : "");
 
         cfw = cfBundle.getFramework();
+        this.nettyBundle = owner.getNettyBundle();
         endpointMgr = cfBundle.getEndpointManager();
 
         endpointName = root;
@@ -272,6 +309,10 @@ public class HttpChain implements ChainEventListener {
 
         final ActiveConfiguration newConfig = new ActiveConfiguration(isHttps, tcpOptions, sslOptions, httpOptions, remoteIpOptions, compressionOptions, samesiteOptions, headersOptions, endpointOptions, resolvedHostName);
 
+        boolean useNetty = Boolean.getBoolean("useNettyTransport");
+
+        System.out.println("USING NETTY?!? " + useNetty);
+
         if (newConfig.configPort < 0 || !newConfig.complete()) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "Stopping chain due to configuration " + newConfig);
@@ -280,7 +321,34 @@ public class HttpChain implements ChainEventListener {
             // save the new/changed configuration before we start setting up the new chain
             currentConfig = newConfig;
 
-            stop();
+            if (useNetty) {
+                endpointMgr.removeEndPoint(endpointName);
+                // We should be able to get a channel from the Future
+                if (channelFuture != null && channelFuture.isDone() && !channelFuture.isCancelled()) {
+                    try {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Found future to be done and not cancelled: " + channelFuture + " so closing channel: " + channelFuture.get().channel());
+                        }
+                        ChannelFuture future = channelFuture.get();
+                        future.channel().close();
+                    } catch (Exception e) {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.warning(tc, "Error closing channel: " + channelFuture, e);
+                        }
+                    }
+                } else if (channelFuture != null && !channelFuture.isCancelled()) { // Future still waiting to complete
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "Found future not yet ran so cancelling: " + channelFuture);
+                    }
+                    channelFuture.cancel(true);
+                    channelFuture = null;
+                } else {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "Found future not yet set: " + channelFuture);
+                    }
+                }
+            } else
+                stop();
         } else {
             Map<Object, Object> chanProps;
 
@@ -289,11 +357,11 @@ public class HttpChain implements ChainEventListener {
                 if (validOldConfig) {
                     if (sameConfig) {
                         int state = chainState.get();
-                        if (state == ChainState.STARTED.val) {
+                        if ((!useNetty && state == ChainState.STARTED.val) || (useNetty && channelFuture != null)) {
                             // If configurations are identical, see if the listening port is also the same
                             // which would indicate that the chain is running with the unchanged configuration
                             // toggle start/stop of chain if we are somehow active on a different port..
-                            sameConfig = oldConfig.validateActivePort();
+                            sameConfig = useNetty ? (channelFuture != null && channelFuture.isDone() && !channelFuture.isCancelled()) : oldConfig.validateActivePort();
                             if (sameConfig) {
                                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                                     Tr.debug(this, tc, "Configuration is unchanged, and chain is already started: " + oldConfig);
@@ -500,28 +568,112 @@ public class HttpChain implements ChainEventListener {
                     httpDispatcher = cfw.addChannel(dispatcherName, cfw.lookupFactory("HTTPDispatcherChannel"), chanProps);
                 }
 
-                // Add chain
-                ChainData cd = cfw.getChain(chainName);
-                if (null == cd) {
-                    final String[] chanList;
-                    if (isHttps)
-                        chanList = new String[] { tcpName, sslName, httpName, dispatcherName };
-                    else
-                        chanList = new String[] { tcpName, httpName, dispatcherName };
+                if (useNetty) {
+                    String typeName = (String) tcpOptions.get("type");
+                    Map<String, Object> options = new HashMap<String, Object>();
+                    options.putAll(tcpOptions);
+                    options.put("endPointName", endpointName);
+                    options.put("hostname", ep.getHost());
+                    options.put("port", String.valueOf(ep.getPort()));
 
-                    cd = cfw.addChain(chainName, FlowType.INBOUND, chanList);
-                    cd.setEnabled(enabled);
-                    cfw.addChainEventListener(this, chainName);
+                    ServerBootstrapExtended bootstrap = nettyBundle.createTCPBootstrap(options);
 
-                    // initialize the chain: this will find/create the channels in the chain,
-                    // initialize each channel, and create the chain. If there are issues with any
-                    // channel properties, they will surface here
-                    // THIS INCLUDES ATTEMPTING TO BIND TO THE PORT
-                    cfw.initChain(chainName);
+                    if (isHttps) {
+                        NettyTlsProvider tlsProvider = owner.getNettyTlsProvider();
+                        if (tlsProvider == null) {
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                Tr.debug(this, tc, "Configuration requires SSL and TLS Provider is not yet loaded: " + oldConfig);
+                            }
+                            return;
+                        }
+                        // Needs appropriate ciphers and ALPN negotiator
+                        String host = ep.getHost();
+                        String port = Integer.toString(ep.getPort());
+                        context = tlsProvider.getInboundSSLContext(sslOptions, host, port);
+                        if (context == null) {
+                            throw new NettyException("Problems creating SSL context");
+                        }
+//                        SelfSignedCertificate ssc = new SelfSignedCertificate();
+//                        ApplicationProtocolConfig apn = new ApplicationProtocolConfig(Protocol.ALPN,
+//                                        // NO_ADVERTISE is currently the only mode supported by both OpenSsl and JDK providers.
+//                                        SelectorFailureBehavior.NO_ADVERTISE,
+//                                        // ACCEPT is currently the only mode supported by both OpenSsl and JDK providers.
+//                                        SelectedListenerFailureBehavior.ACCEPT, ApplicationProtocolNames.HTTP_2);
+//                        context = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey(), null).ciphers(CIPHERS,
+//                                                                                                                 SupportedCipherSuiteFilter.INSTANCE).applicationProtocolConfig(apn).build();
+                    }
+                    bootstrap.childHandler(new HTTP2ChannelInitializer(bootstrap.getBaseInitializer(), this));
+
+                    HttpChain parent = this;
+
+                    channelFuture = nettyBundle.start(bootstrap, ep.getHost(), ep.getPort(), f -> {
+                        if (f.isCancelled() || !f.isSuccess()) {
+                            Tr.debug(this, tc, "Channel exception during connect: " + f.cause().getMessage());
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+                                Tr.entry(parent, tc, "destroy", (Exception) f.cause());
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+                                Tr.exit(parent, tc, "destroy");
+                        } else {
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+                                Tr.entry(parent, tc, "ready", f);
+                            Channel chan = f.channel();
+//                                parent.serverChan = chan;
+                            f.addListener(innerFuture -> {
+                                if (innerFuture.isCancelled() || !innerFuture.isSuccess()) {
+                                    Tr.debug(this, tc, "Channel exception during connect. Couldn't add quiesce handler: " + f.cause().getMessage());
+                                    handleStartupError(new Exception(f.cause()), newConfig);
+                                } else {
+//                                        if(!_isChainStarted) {
+//                                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                                                Tr.debug(this, tc, "Server Channel: " + serverChan + " will be closed because chain was disabled");
+//                                            }
+//                                            handleStartupError(f.cause(), newConfig);
+//                                        }else {
+                                    if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+                                        Tr.entry(parent, tc, "adding quiesce", f);
+                                    nettyBundle.registerEndpointQuiesce(chan, new Callable<Void>() {
+                                        @Override
+                                        public Void call() throws Exception {
+                                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                                Tr.debug(this, tc, "Server Channel: " + chan + " received quiesce event so running close");
+                                            }
+                                            quiesceChain();
+                                            return null;
+                                        }
+
+                                    });
+//                                        }
+                                }
+                            });
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isEntryEnabled())
+                                Tr.exit(parent, tc, "ready");
+                        }
+                    });
+                } else {
+                    // Add chain
+                    ChainData cd = cfw.getChain(chainName);
+                    if (null == cd) {
+                        final String[] chanList;
+                        if (isHttps)
+                            chanList = new String[] { tcpName, sslName, httpName, dispatcherName };
+                        else
+                            chanList = new String[] { tcpName, httpName, dispatcherName };
+
+                        cd = cfw.addChain(chainName, FlowType.INBOUND, chanList);
+                        cd.setEnabled(enabled);
+                        cfw.addChainEventListener(this, chainName);
+
+                        // initialize the chain: this will find/create the channels in the chain,
+                        // initialize each channel, and create the chain. If there are issues with any
+                        // channel properties, they will surface here
+                        // THIS INCLUDES ATTEMPTING TO BIND TO THE PORT
+                        cfw.initChain(chainName);
+                    }
                 }
 
                 // We configured the chain successfully
                 newConfig.validConfiguration = true;
+
             } catch (ChannelException e) {
                 handleStartupError(e, newConfig); // FFDCIgnore: CFW will have logged and FFDCd already
             } catch (ChainException e) {
@@ -532,7 +684,7 @@ public class HttpChain implements ChainEventListener {
                 handleStartupError(e, newConfig);
             }
 
-            if (newConfig.validConfiguration) {
+            if (newConfig.validConfiguration && !useNetty) {
                 try {
                     // Start the chain: follow along to chainStarted method (CFW callback)
                     cfw.startChain(chainName);
@@ -547,6 +699,115 @@ public class HttpChain implements ChainEventListener {
                 }
             }
         }
+    }
+
+    private static final UpgradeCodecFactory upgradeCodecFactory = new UpgradeCodecFactory() {
+        @Override
+        public UpgradeCodec newUpgradeCodec(CharSequence protocol) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "New upgrade codec called for protocol " + protocol);
+            }
+//            if (AsciiString.contentEquals(Http2CodecUtil.HTTP_UPGRADE_PROTOCOL_NAME, protocol)) {
+//                return new Http2ServerUpgradeCodec(new NettyHttp2HandlerBuilder().build());
+//            } else {
+//                return null;
+//            }
+            if (AsciiString.contentEquals(Http2CodecUtil.HTTP_UPGRADE_PROTOCOL_NAME, protocol)) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Valid h2c protocol, setting up http2 clear text " + protocol);
+                }
+                DefaultHttp2Connection connection = new DefaultHttp2Connection(true);
+                InboundHttp2ToHttpAdapter listener = new InboundHttp2ToHttpAdapterBuilder(connection).propagateSettings(false).validateHttpHeaders(false).maxContentLength(NettyProtocolNegotiationHandler.MAX_CONTENT_LENGTH).build();
+                // Override upgrade to be able to forward the request to dispatcher for handling
+                return new Http2ServerUpgradeCodec(new HttpToHttp2ConnectionHandlerBuilder().frameListener(listener).frameLogger(NettyProtocolNegotiationHandler.LOGGER).connection(connection).build()) {
+                    @Override
+                    public void upgradeTo(ChannelHandlerContext ctx, io.netty.handler.codec.http.FullHttpRequest request) {
+                        // Remove fallback http1 handler
+                        // Call upgrade
+                        super.upgradeTo(ctx, request);
+                        // Set as stream 1
+                        request.headers().set(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 1);
+                        // Forward request to dispatcher
+                        ctx.fireChannelRead(ReferenceCountUtil.retain(request));
+                    };
+                };
+
+            } else {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Returning null since no valid protocol was found: " + protocol);
+                }
+                return null;
+            }
+        }
+    };
+
+    private class HTTP2ChannelInitializer extends ChannelInitializerWrapper {
+        final ChannelInitializerWrapper parent;
+        private final HttpChain chain;
+
+        public HTTP2ChannelInitializer(ChannelInitializerWrapper parent, HttpChain chain) {
+            this.parent = parent;
+            this.chain = chain;
+        }
+
+        @Override
+        protected void initChannel(Channel ch) throws Exception {
+            parent.init(ch);
+            ChannelPipeline pipeline = ch.pipeline();
+            if (isHttps) {
+                pipeline.addLast(context.newHandler(ch.alloc()), new NettyProtocolNegotiationHandler());
+            } else {
+                final HttpServerCodec sourceCodec = new HttpServerCodec();
+                final HttpServerUpgradeHandler upgradeHandler = new HttpServerUpgradeHandler(sourceCodec, upgradeCodecFactory);
+//                final CleartextHttp2ServerUpgradeHandler cleartextHttp2ServerUpgradeHandler = new CleartextHttp2ServerUpgradeHandler(sourceCodec, upgradeHandler, new NettyHttp2HandlerBuilder().build());
+                DefaultHttp2Connection connection = new DefaultHttp2Connection(true);
+                InboundHttp2ToHttpAdapter listener = new InboundHttp2ToHttpAdapterBuilder(connection).propagateSettings(false).validateHttpHeaders(false).maxContentLength(NettyProtocolNegotiationHandler.MAX_CONTENT_LENGTH).build();
+                final CleartextHttp2ServerUpgradeHandler cleartextHttp2ServerUpgradeHandler = new CleartextHttp2ServerUpgradeHandler(sourceCodec, upgradeHandler, new HttpToHttp2ConnectionHandlerBuilder().frameListener(listener).frameLogger(NettyProtocolNegotiationHandler.LOGGER).connection(connection).build());
+
+                pipeline.addLast(cleartextHttp2ServerUpgradeHandler);
+                pipeline.addLast("Upgrade Detector", new SimpleUserEventChannelHandler<UpgradeEvent>() {
+
+                    @Override
+                    protected void eventReceived(ChannelHandlerContext ctx, UpgradeEvent evt) throws Exception {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Got upgrade event for channel " + ctx.channel(), evt);
+                        }
+//                        ByteBuf REQ_BYTES = Unpooled.copiedBuffer("Request!!", CharsetUtil.UTF_8).asReadOnly();
+//                        DefaultFullHttpRequest req = new DefaultFullHttpRequest(HTTP_1_1, GET, "", REQ_BYTES);
+//                        req.retain();
+//                        req.headers().set(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(), 1);
+//                        ctx.fireChannelRead(req);
+                        ctx.fireUserEventTriggered(evt.retain());
+                    }
+                });
+                pipeline.addLast("Prior Knowledge Upgrade Detector", new SimpleUserEventChannelHandler<PriorKnowledgeUpgradeEvent>() {
+
+                    @Override
+                    protected void eventReceived(ChannelHandlerContext ctx, PriorKnowledgeUpgradeEvent evt) throws Exception {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Got priorKnowledge upgrade event for channel " + ctx.channel(), evt);
+                        }
+                        ctx.fireUserEventTriggered(evt);
+                    }
+                });
+                // Handler would go here for adding all HTTP related handlers and then would be removed if an HTTP2 upgrade occurs
+                // Dispatcher added to handle FullHTTP Objects
+                pipeline.addLast(new NettyHttpDispatcherHandler());
+                pipeline.addLast("ObjectCatcher", new SimpleChannelInboundHandler<Object>() {
+                    @Override
+                    protected void channelRead0(ChannelHandlerContext ctx, Object msg) throws Exception {
+                        // If this handler is hit then no upgrade has been attempted and the client is just talking HTTP.
+                        System.err.println("Hit last handler due to message of class: " + msg.getClass() + " Closing channel: " + ch);
+                        Tr.error(tc, "No upgrade attempted, due to unknown message hit ", msg);
+                        ch.close();
+                    }
+                });
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Configured pipeline with " + pipeline.names());
+                }
+            }
+        }
+
     }
 
     @FFDCIgnore({ ChannelException.class, ChainException.class })
