@@ -153,6 +153,7 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
      */
     public HttpDispatcherLink() {
         // nothing
+        // nothing at all
     }
 
     /**
