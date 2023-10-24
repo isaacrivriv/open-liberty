@@ -67,6 +67,7 @@ public class NettyHttpChannelConfig extends HttpChannelConfig {
 
         if (useSameSiteOptions) {
             parseSameSiteOptions(config);
+            initSameSiteCookiesPatterns();
         }
 
         parseHttpOptions(config);
@@ -104,6 +105,7 @@ public class NettyHttpChannelConfig extends HttpChannelConfig {
             case SAMESITE: {
                 this.useSameSiteOptions = Boolean.TRUE;
                 this.parseSameSiteOptions(config);
+                initSameSiteCookiesPatterns();
                 break;
             }
 

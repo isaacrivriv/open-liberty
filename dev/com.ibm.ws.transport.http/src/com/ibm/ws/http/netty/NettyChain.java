@@ -309,6 +309,12 @@ public class NettyChain extends HttpChain {
             //  httpPipeline.updateConfig(ConfigElement.REMOTE_IP, owner.getRemoteIpConfig());
             httpPipeline.updateConfig(ConfigElement.SAMESITE, this.owner.getSamesiteConfig());
 
+            try {
+                Thread.sleep(1000);
+            } catch (Exception e) {
+                // TODO: handle exception
+            }
+
             VirtualHostMap.notifyStarted(owner, () -> currentConfig.getResolvedHost(), currentConfig.getConfigPort(), isHttps);
             String topic = owner.getEventTopic() + HttpServiceConstants.ENDPOINT_STARTED;
             postEvent(topic, currentConfig, null);

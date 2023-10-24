@@ -1158,8 +1158,11 @@ public class HttpChannelConfig {
             if (option instanceof String[]) {
                 String[] cookies = (String[]) option;
                 for (String s : cookies) {
+                    System.out.println("Adding lax cookie: " + s);
                     addSameSiteAttribute(s, HttpConfigConstants.SameSite.LAX);
                 }
+            } else {
+                System.out.println("Not a string[]");
             }
             if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
                 Tr.event(tc, "Http Channel Config: SameSite Lax configuration parsed.");
@@ -1265,8 +1268,9 @@ public class HttpChannelConfig {
      * registered as 'lax', 'none', and 'strict'; as well as a representation of all values that were considered
      * erroneous.
      */
-    private void initSameSiteCookiesPatterns() {
+    protected void initSameSiteCookiesPatterns() {
         if (this.useSameSiteConfig()) {
+            this.onlySameSiteStar = false;
             Map<Pattern, String> patterns = new HashMap<Pattern, String>();
             Pattern p = null;
             String sameSiteValue = null;
