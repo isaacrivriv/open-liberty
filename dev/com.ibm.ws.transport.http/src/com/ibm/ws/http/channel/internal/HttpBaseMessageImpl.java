@@ -591,6 +591,7 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
      *
      * @return HttpServiceContextImpl
      */
+    @Override
     public HttpServiceContextImpl getServiceContext() {
         return this.myHSC;
     }
@@ -776,6 +777,8 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "ContentLength set to " + Long.toString(length));
         }
+        new Exception().printStackTrace();
+        System.out.println("Previous length: " + getContentLength() + ", ContentLength set to " + Long.toString(length));
     }
 
     /**
@@ -829,7 +832,8 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
                 }
                 return false;
             }
-
+            new Exception().printStackTrace();
+            System.out.println("Previous length: " + getContentLength() + ", ContentLength set to " + Long.toString(length));
             this.myContentLength = length;
         } catch (NumberFormatException nfe) {
             // no FFDC required
@@ -2966,6 +2970,7 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
      *
      * @return long
      */
+    @Override
     public long getStartTime() {
         return this.startTime;
     }

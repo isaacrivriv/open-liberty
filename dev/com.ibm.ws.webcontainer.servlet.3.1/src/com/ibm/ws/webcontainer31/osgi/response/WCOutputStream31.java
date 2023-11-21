@@ -669,5 +669,12 @@ public class WCOutputStream31 extends WCOutputStream
     public void setOutputStreamNBClosed(boolean outputStreamNBClosed) {
         this.outputStreamNBClosed = outputStreamNBClosed;
     }
+    
+    /**
+     * @param outputStreamNBClosed the outputStreamNBClosed to set
+     */
+    public AsyncWriteCallback getCallback() {
+        return _callback;
+    }
 
 }

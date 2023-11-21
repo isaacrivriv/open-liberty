@@ -13,6 +13,8 @@
 package com.ibm.ws.http.channel.internal.inbound;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -65,7 +67,10 @@ import com.ibm.wsspi.http.channel.values.StatusCodes;
 import com.ibm.wsspi.http.channel.values.TransferEncodingValues;
 import com.ibm.wsspi.http.channel.values.VersionValues;
 import com.ibm.wsspi.http.logging.DebugLog;
+import com.ibm.wsspi.tcpchannel.SSLConnectionContext;
 import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
+import com.ibm.wsspi.tcpchannel.TCPReadRequestContext;
+import com.ibm.wsspi.tcpchannel.TCPWriteRequestContext;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -122,14 +127,55 @@ public class HttpInboundServiceContextImpl extends HttpServiceContextImpl implem
         init(tsc, link, vc, hcc);
     }
 
-    public HttpInboundServiceContextImpl(ChannelHandlerContext context) {
+    public HttpInboundServiceContextImpl(ChannelHandlerContext context, VirtualConnection vc) {
         super();
         nettyContext = context;
 
         super.init(context);
 
         this.setHeadersParsed();
+        setVC(vc);
+        setTSC(new TCPConnectionContext() {
 
+            @Override
+            public TCPWriteRequestContext getWriteInterface() {
+                throw new UnsupportedOperationException("Can't call getWriteInterface for Netty!!");
+            }
+
+            @Override
+            public SSLConnectionContext getSSLContext() {
+                throw new UnsupportedOperationException("Can't call getSSLContext for Netty!!");
+            }
+
+            @Override
+            public int getRemotePort() {
+                InetSocketAddress remote = (InetSocketAddress) nettyContext.channel().remoteAddress();
+                return remote.getPort();
+            }
+
+            @Override
+            public InetAddress getRemoteAddress() {
+                InetSocketAddress remote = (InetSocketAddress) nettyContext.channel().remoteAddress();
+                return remote.getAddress();
+            }
+
+            @Override
+            public TCPReadRequestContext getReadInterface() {
+                throw new UnsupportedOperationException("Can't call getReadInterface for Netty!!");
+            }
+
+            @Override
+            public int getLocalPort() {
+                InetSocketAddress local = (InetSocketAddress) nettyContext.channel().localAddress();
+                return local.getPort();
+            }
+
+            @Override
+            public InetAddress getLocalAddress() {
+                InetSocketAddress local = (InetSocketAddress) nettyContext.channel().localAddress();
+                return local.getAddress();
+            }
+        });
     }
 
     /**
@@ -777,6 +823,8 @@ public class HttpInboundServiceContextImpl extends HttpServiceContextImpl implem
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "sendResponseBody(body)");
         }
+
+        new Exception().printStackTrace();
 
         if (!headersParsed()) {
             // request message must have the headers parsed prior to sending

@@ -13,12 +13,16 @@
 package com.ibm.ws.webcontainer31.util;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 
 import javax.servlet.ReadListener;
 import javax.servlet.http.WebConnection;
 
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
+import com.ibm.ws.http2.upgrade.ServletUpgradeHandler;
 import com.ibm.ws.transport.access.TransportConstants;
 import com.ibm.ws.webcontainer31.async.ThreadContextManager;
 import com.ibm.ws.webcontainer31.osgi.osgi.WebContainerConstants;
@@ -27,9 +31,20 @@ import com.ibm.ws.webcontainer31.upgrade.UpgradeReadCallback;
 import com.ibm.ws.webcontainer31.upgrade.UpgradedWebConnectionImpl;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
 import com.ibm.wsspi.channelfw.ChannelFrameworkFactory;
+import com.ibm.wsspi.channelfw.VirtualConnection;
 import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
 import com.ibm.wsspi.tcpchannel.TCPReadRequestContext;
 import com.ibm.wsspi.webcontainer31.WCCustomProperties31;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.CoalescingBufferQueue;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.VoidChannelPromise;
+import io.netty.handler.timeout.IdleStateHandler;
+import io.netty.handler.timeout.ReadTimeoutHandler;
 
 /**
  * This is the utility class that SRTUpgradeInputStream31 uses during the upgrade path of a servlet. This does all the reading and writing of the data.
@@ -43,7 +58,7 @@ public class UpgradeInputByteBufferUtil {
     //TCP Connection Context from the WebConnection which we use to do our reads
     private TCPConnectionContext _tcpContext;
     //Number of total bytes read over the duration of this stream. Please note: this isn't printed anywhere, but could be for debug purposes
-    private long _totalBytesRead = 0L;
+    protected long _totalBytesRead = 0L;
     //The ReadListener provided from the application
     private ReadListener _rl;
     //The callback used by the TCP Channel when we do an async read. This will trigger the application's ReadListener
@@ -68,12 +83,23 @@ public class UpgradeInputByteBufferUtil {
     private boolean isAlldataReadCalled = false;
     //this flag will track if onError has been called
     private boolean isonErrorCalled = false;
+    
+    // Buffer cummulation for reading
 
 
     public UpgradeInputByteBufferUtil(UpgradedWebConnectionImpl up)
     {
         _upConn = up;
-        _tcpContext = _upConn.getTCPConnectionContext();
+        
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()){  
+            Tr.debug(tc, "UpgradeInputByteBufferUtil:: constructor");         
+        }
+    }
+    
+    public UpgradeInputByteBufferUtil(UpgradedWebConnectionImpl up, TCPConnectionContext tcpContext)
+    {
+        _upConn = up;
+        _tcpContext = tcpContext;
         
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()){  
             Tr.debug(tc, "UpgradeInputByteBufferUtil:: constructor");         
@@ -308,7 +334,7 @@ public class UpgradeInputByteBufferUtil {
      * 
      * @throws IOException
      */
-    private void validate() throws IOException {
+    protected void validate() throws IOException {
         if (null != _error) {
             throw _error;
         }
@@ -641,6 +667,279 @@ public class UpgradeInputByteBufferUtil {
      */
     public void setIsonErrorCalled(boolean isonErrorCalled) {
         this.isonErrorCalled = isonErrorCalled;
+    }
+    
+    
+    public static class NettyUpgradeInputByteBufferUtil extends UpgradeInputByteBufferUtil{
+        
+        //Netty channel from the WebConnection which we use to do our reads
+        private Channel nettyChannel;
+        private ServletUpgradeHandler upgradeHandler;
+        // Need to keep track of buffers received here
+//        CoalescingBufferQueue queue;
+
+        /**
+         * @param up
+         */
+        public NettyUpgradeInputByteBufferUtil(UpgradedWebConnectionImpl up, Channel channel) {
+            super(up);
+            // TODO Auto-generated constructor stub
+            this.nettyChannel = channel;
+//            this.queue = new CoalescingBufferQueue(channel);
+            ServletUpgradeHandler upgradeHandler = channel.pipeline().get(ServletUpgradeHandler.class);
+            if(upgradeHandler == null) {
+                throw new UnsupportedOperationException("Can't work without upgrade handler!!");
+            }
+            this.upgradeHandler = upgradeHandler;
+            super._isFirstRead = false;
+            NettyUpgradeInputByteBufferUtil parent = this;
+            channel.pipeline().addBefore(channel.pipeline().context(upgradeHandler).name(), null, new ReadTimeoutHandler((WCCustomProperties31.UPGRADE_READ_TIMEOUT<0)?0:WCCustomProperties31.UPGRADE_READ_TIMEOUT, TimeUnit.MILLISECONDS) {
+                @Override
+                protected void readTimedOut(ChannelHandlerContext ctx) throws Exception {
+                    System.out.println("Read timeout!!");
+                    if(parent.get_tcpChannelCallback() != null) {
+                        System.out.println("Calling callback for read timeout!");
+                        parent.get_tcpChannelCallback().error(null, null, new SocketTimeoutException("Socket operation timed out before it could be completed local="+ctx.channel().localAddress()+" remote="+ctx.channel().remoteAddress()));
+                    }
+                    System.out.println("Finished read timeout!!");
+                }
+            });
+//            if(nettyChannel.pipeline().get("NettyUpgradeInputStream31Handler") != null) {
+//                throw new UnsupportedOperationException("Tried adding the same NettyUpgradeInputStream31Handler to the channel for reading!!");
+//            }
+//            nettyChannel.pipeline().addLast("NettyUpgradeInputStream31Handler", new SimpleChannelInboundHandler<ByteBuf>() {
+//
+//                @Override
+//                protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
+//                    // TODO Auto-generated method stub
+//                    System.out.println("Received byte buf: "+msg);
+//                    _totalBytesRead+=msg.readableBytes();
+//                    queue.add(msg.retain());
+//                }
+//                
+//            });
+        }
+        
+        @Override
+        protected void validate() throws IOException {
+            // TODO Auto-generated method stub
+            if (null != super._error) {
+                throw super._error;
+            }
+            
+////            if(!super._isReadLine && !isReady()){ //isReady gives issue, just need to read and block until available
+//            if(!super._isReadLine){
+//                //If there is no data available then isReady will have returned false and this throw an IllegalStateException
+//                if (TraceComponent.isAnyTracingEnabled() && tc.isErrorEnabled())
+//                    Tr.error(tc, "read.failed.isReady.false");
+//                throw new IllegalStateException(Tr.formatMessage(tc, "read.failed.isReady.false"));
+//            }
+        }
+        
+        // Not valid in Netty Context
+        
+        @Override
+        public void initialRead() {
+            throw new UnsupportedOperationException("initialRead not supported in Netty context");
+        }
+        
+        @Override
+        public void configurePostInitialReadBuffer() {
+            throw new UnsupportedOperationException("configurePostInitialReadBuffer not supported in Netty context");
+        }
+        
+        @Override
+        public boolean isInitialRead() {
+            throw new UnsupportedOperationException("configurePostInitialReadBuffer not supported in Netty context");
+        }
+        
+        @Override
+        public void setIsInitialRead(boolean isInitialRead) {
+            // TODO Auto-generated method stub
+            System.out.println("Called in Netty context!!");
+            super.setIsInitialRead(isInitialRead);
+        }
+        
+        @Override
+        public boolean isReady() {
+//            return !queue.isEmpty();
+            return upgradeHandler.containsQueuedData();
+        }
+        
+        public int read() throws IOException {
+            validate();
+            int rc = -1;
+            
+//            rc = queue.remove(1, new VoidChannelPromise(nettyChannel, true)).getByte(0) & 0x000000FF;
+            if(!upgradeHandler.containsQueuedData()) { // Block until data becomes available
+                try {
+                    System.out.println("Waiting because data isn't available yet!");
+                    upgradeHandler.waitForDataRead(WCCustomProperties31.UPGRADE_READ_TIMEOUT);
+                } catch (InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    // Do you need FFDC here? Remember FFDC instrumentation and @FFDCIgnore
+                    // Read timeout!!
+                    e.printStackTrace();
+                    throw new SocketTimeoutException("Socket operation timed out before it could be completed local="+nettyChannel.localAddress()+" remote="+nettyChannel.remoteAddress());
+                }
+            }
+            rc = upgradeHandler.read(1, null).getByte(0) & 0x000000FF;
+                
+            return rc;
+        }
+        
+        public int read(byte[] output, int offset, int length) throws IOException {
+            
+            int size = -1;
+            validate();
+            
+            if (0 == length) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "read(byte[],int,int), Target length was 0");
+                }
+                return length;
+            }
+            
+//            size = queue.readableBytes();
+//            ByteBuf buffer = queue.remove(size, new VoidChannelPromise(nettyChannel, true));
+            
+//            size = upgradeHandler.queuedDataSize();
+            if(!upgradeHandler.containsQueuedData()) { // Block until data becomes available
+                try {
+                    System.out.println("Waiting because data isn't available yet!");
+                    upgradeHandler.waitForDataRead(WCCustomProperties31.UPGRADE_READ_TIMEOUT);
+                } catch (InterruptedException e) {
+                    // TODO Auto-generated catch block
+                    // Do you need FFDC here? Remember FFDC instrumentation and @FFDCIgnore
+                    // Read timeout!!
+                    e.printStackTrace();
+                    throw new SocketTimeoutException("Socket operation timed out before it could be completed local="+nettyChannel.localAddress()+" remote="+nettyChannel.remoteAddress());
+                }
+            }
+            ByteBuf buffer = upgradeHandler.read(length, null);
+            size = buffer.readableBytes();
+            
+            System.out.println("Size: "+size);
+            System.out.println("Offset: "+offset);
+            System.out.println("Length: "+length);
+            System.out.println("Buffer data! "+ByteBufUtil.hexDump(buffer));
+            
+            System.out.println("Buffer data after get bytes! "+ByteBufUtil.hexDump(buffer.readBytes(output, offset, size)));
+            
+            System.out.println("Copied: " + Arrays.toString(output));
+            
+//            if(doRead(length)){
+//                size = _buffer.limit() - _buffer.position();
+//                
+//                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+//                {  
+//                  Tr.debug(tc, "(byte[],int,int) Filling byte array, size --> " + size);         
+//                }
+//                _buffer.get(output, offset, size);
+//            }
+//            _buffer.release();
+//            _buffer = null;
+            
+            return size;
+        }
+        
+        public void setupReadListener(ReadListener readListenerl, SRTUpgradeInputStream31 srtUpgradeStream){
+            
+            System.out.println("Setting up read listener!");
+            
+            if(readListenerl == null){
+                if (TraceComponent.isAnyTracingEnabled() && tc.isErrorEnabled())
+                    Tr.error(tc, "readlistener.is.null");
+                throw new NullPointerException(Tr.formatMessage(tc, "readlistener.is.null"));
+            }
+            if(super._rl != null){
+                if (TraceComponent.isAnyTracingEnabled() && tc.isErrorEnabled())
+                    Tr.error(tc, "readlistener.already.started");
+                throw new IllegalStateException(Tr.formatMessage(tc, "readlistener.already.started"));
+                
+            }
+            
+            //Save off the current Thread data by creating the ThreadContextManager. Then pass it into the callback       
+            ThreadContextManager tcm = new ThreadContextManager();
+            
+            super._tcpChannelCallback = new NettyUpgradeReadCallBack(readListenerl, this, tcm, srtUpgradeStream);
+            super._rl = readListenerl;
+            this.upgradeHandler.setReadListener(super._tcpChannelCallback);
+            super._upConn.getVirtualConnection().getStateMap().put(TransportConstants.UPGRADED_LISTENER, "true");
+            
+            
+//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()){
+//                Tr.debug(tc, "setupReadListener, Starting the initial read");
+//            }
+//            initialRead();
+//            
+//            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()){
+//                Tr.debug(tc, "setupReadListener, ReadListener set : " + super._rl);
+//            }
+            
+        }
+        
+    }
+    
+    public class NettyUpgradeReadCallBack extends UpgradeReadCallback{
+
+        /**
+         * @param rl
+         * @param uIBBU
+         * @param tcm
+         * @param srtUpgradeStream
+         */
+        public NettyUpgradeReadCallBack(ReadListener rl, UpgradeInputByteBufferUtil uIBBU, ThreadContextManager tcm, SRTUpgradeInputStream31 srtUpgradeStream) {
+            super(rl, uIBBU, tcm, srtUpgradeStream);
+            // TODO Auto-generated constructor stub
+        }
+        
+        @Override
+        public void complete(VirtualConnection vc, TCPReadRequestContext rsc) {
+            synchronized(_srtUpgradeStream){
+                if(_upgradeStream.isClosing()){
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "The upgradedStream is closing, won't notify user of data");
+                    }
+                    _srtUpgradeStream.notify();
+                    return;
+                }
+            }
+            try{
+                //Set the original Context Class Loader before calling the users onDataAvailable
+                //Push the original thread's context onto the current thread, also save off the current thread's context
+                _contextManager.pushContextData();
+
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "Calling user's ReadListener.onDataAvailable : " + _rl);
+                }
+                //Call into the user's ReadListener to indicate there is data available
+                _rl.onDataAvailable();
+
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "User's ReadListener.onDataAvailable complete, reading for more data : " + _rl);
+                }
+            } catch(Throwable onDataAvailableException) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "ReadListener.onDataAvailable threw an exception : " + onDataAvailableException + ", " + _rl);
+                }
+                //Call directly into the customers ReadListener.onError
+                _rl.onError(onDataAvailableException);
+            } finally {
+                //Revert back to the thread's current context
+                _contextManager.popContextData();
+
+                synchronized(_srtUpgradeStream){
+                    if(_upgradeStream.isClosing()){
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(tc, "The upgradedStream is closing, won't issue the initial read");
+                        }
+                        _srtUpgradeStream.notify();
+                    }
+                }
+            }
+        }
+        
     }
 
 }

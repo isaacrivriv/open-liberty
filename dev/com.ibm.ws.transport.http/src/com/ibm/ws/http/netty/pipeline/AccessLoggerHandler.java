@@ -39,6 +39,8 @@ public class AccessLoggerHandler extends ChannelDuplexHandler {
         if (Objects.nonNull(msg) && msg instanceof HttpInboundServiceContextImpl) {
             HttpInboundServiceContextImpl isc = (HttpInboundServiceContextImpl) msg;
             config.getAccessLog().log(isc.getRequest(), isc.getResponse(), isc.getRequestVersion().getName(), null, isc.getRemoteAddr().getHostAddress(), isc.getNumBytesWritten());
+            System.out.println("No need to write access logger so will not write forward.");
+            return;
         }
         super.write(ctx, msg, promise);
 

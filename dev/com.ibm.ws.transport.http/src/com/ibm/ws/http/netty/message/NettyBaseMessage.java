@@ -721,6 +721,8 @@ public class NettyBaseMessage implements HttpBaseMessage {
 
     @Override
     public void setContentLength(long length) {
+        new Exception().printStackTrace();
+        System.out.println("ContentLength set to " + Long.toString(length));
         HttpUtil.setContentLength(message, length);
 
     }
@@ -968,10 +970,12 @@ public class NettyBaseMessage implements HttpBaseMessage {
 
                 //First attempt to match the name explicitly.
                 if (config.getSameSiteCookies().containsKey(cookie.getName())) {
+                    System.out.println("Found samesite cookie!");
                     sameSiteAttributeValue = config.getSameSiteCookies().get(cookie.getName());
                 }
                 //If the only pattern is a standalone '*' avoid regex cost
                 else if (config.onlySameSiteStar()) {
+                    System.out.println("Found samesite star cookie!");
                     sameSiteAttributeValue = config.getSameSiteCookies().get(HttpConfigConstants.WILDCARD_CHAR);
                 }
 
@@ -979,7 +983,9 @@ public class NettyBaseMessage implements HttpBaseMessage {
                     //Attempt to find a match amongst the configured SameSite patterns
                     for (Pattern p : config.getSameSitePatterns().keySet()) {
                         m = p.matcher(cookie.getName());
+                        System.out.println("Checking match! " + cookie.getName());
                         if (m.matches()) {
+                            System.out.println("Found samesite cookie match!");
                             sameSiteAttributeValue = config.getSameSitePatterns().get(p);
                             break;
                         }

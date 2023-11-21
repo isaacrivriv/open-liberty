@@ -36,6 +36,12 @@ public class NettyVirtualConnectionImpl implements VirtualConnection {
         this.stateStore = new HashMap<Object, Object>();
     }
 
+    public static NettyVirtualConnectionImpl createVC() {
+        NettyVirtualConnectionImpl vc = new NettyVirtualConnectionImpl();
+        vc.init();
+        return vc;
+    }
+
     @Override
     public void destroy() {
         // TODO Auto-generated method stub

@@ -62,6 +62,7 @@ import com.ibm.ws.http.netty.message.NettyResponseMessage;
 import com.ibm.ws.http.netty.pipeline.ResponseCompressionHandler;
 import com.ibm.ws.http.netty.pipeline.inbound.HttpDispatcherHandler;
 import com.ibm.ws.http2.GrpcServletServices;
+import com.ibm.ws.http2.upgrade.ServletUpgradeHandler;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
 import com.ibm.wsspi.bytebuffer.WsByteBufferUtils;
 import com.ibm.wsspi.channelfw.InterChannelCallback;
@@ -114,7 +115,6 @@ import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpUtil;
-import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.codec.http2.DefaultHttp2Headers;
 import io.netty.handler.codec.http2.Http2Connection;
 import io.netty.handler.codec.http2.Http2Headers;
@@ -2268,8 +2268,18 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
         MSP.log("should write netty response");
 
+//        try {
+//            this.nettyContext.channel().writeAndFlush(this.nettyResponse).sync();
+//            this.setHeadersSent();
+//        } catch (InterruptedException e) {
+//            // TODO Auto-generated catch block
+//            // Do you need FFDC here? Remember FFDC instrumentation and @FFDCIgnore
+//            e.printStackTrace();
+//        }
+
         this.nettyContext.channel().writeAndFlush(this.nettyResponse);
         this.setHeadersSent();
+
         //setupCompressionHandler();
 
     }
@@ -2761,6 +2771,7 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         this.writingHeaders = false;
 
         if (!getHttpConfig().useNetty()) {
+            System.out.println("Not using netty");
             // if a valid body is outgoing, check the encoding flags to see if we
             // need to automatically change the buffers
             if (!isRawBody() && !headersSent()) {
@@ -2785,6 +2796,8 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
             }
 
             if (!headersSent()) {
+                System.out.println("Not headers sent");
+                System.out.println("prepareOutgoing: partial: " + isPartialBody() + " chunked: " + msg.isChunkedEncodingSet() + " cl: " + msg.getContentLength());
                 // header compliance is checked by formatHeaders so check for either
                 // the partial body flag or explicit chunked encoding here
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -2843,10 +2856,12 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         // otherwise ignore the body buffers
         if (null != buffers) {
             if (isOutgoingBodyValid()) {
+                System.out.println("Valid body");
 
                 formatBody(buffers, msg);
 
             } else {
+                System.out.println("Not valid body");
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "Ignoring " + buffers.length + " body buffers");
                 }
@@ -2940,7 +2955,12 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
         addBytesWritten(GenericUtils.sizeOf(buffers));
 
-        if (Objects.nonNull(buffers)) {
+        if (this.nettyContext.channel().pipeline().get(ServletUpgradeHandler.class) != null) {
+            System.out.println("Skipping HTTP content because upgrade was triggered!");
+            System.out.println("Content: " + WsByteBufferUtils.asString(buffers));
+
+        }
+        if (Objects.nonNull(buffers) && this.nettyContext.channel().pipeline().get(ServletUpgradeHandler.class) == null) {
 
             MSP.log("sendOutgoing are buffers good? " + GenericUtils.sizeOf(buffers));
 
@@ -3273,8 +3293,13 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
                 }
             }
         }
+        if (this.nettyContext.channel().pipeline().get(ServletUpgradeHandler.class) != null) {
+            System.out.println("Skipping HTTP content because upgrade was triggered!");
+            System.out.println("Content: " + WsByteBufferUtils.asString(buffers));
+
+        }
         DefaultHttpContent content;
-        if (Objects.nonNull(buffers)) {
+        if (Objects.nonNull(buffers) && this.nettyContext.channel().pipeline().get(ServletUpgradeHandler.class) == null) {
             for (WsByteBuffer buffer : buffers) {
                 if (Objects.nonNull(buffer)) {
                     System.out.println("Writing buffer: " + buffer);
@@ -3298,8 +3323,12 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
                                                                                                             "-1")), trailers);
             }
             // Sending last http content since all data was written
-            System.out.println("Sending last http content!");
-            this.nettyContext.channel().write(lastContent);
+            if (this.nettyContext.channel().pipeline().get(ServletUpgradeHandler.class) != null) {
+                System.out.println("Skipping last HTTP content for upgrade");
+            } else {
+                System.out.println("Sending last http content!");
+                this.nettyContext.channel().write(lastContent);
+            }
         } else {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "sendFullOutgoing : No buffers to write ");
@@ -3315,7 +3344,12 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
                 lastContent = new LastStreamSpecificHttpContent(Integer.valueOf(nettyResponse.headers().get(HttpConversionUtil.ExtensionHeaderNames.STREAM_ID.text(),
                                                                                                             "-1")), trailers);
             }
-            this.nettyContext.channel().write(lastContent);
+            if (this.nettyContext.channel().pipeline().get(ServletUpgradeHandler.class) != null) {
+                System.out.println("Skipping last HTTP content for upgrade");
+            } else {
+                System.out.println("Sending last http content!");
+                this.nettyContext.channel().write(lastContent);
+            }
         }
         this.nettyContext.channel().flush();
         MSP.log("set message sent");
@@ -3586,6 +3620,10 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         if (null != writeBuffers) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "Writing (sync) " + writeBuffers.length + " buffers.");
+            }
+            for (WsByteBuffer buffer : writeBuffers) {
+                System.out.println("Writing buffer: " + buffer);
+                System.out.println("Content: " + WsByteBufferUtils.asString(buffer));
             }
 
             getTSC().getWriteInterface().setBuffers(writeBuffers);
@@ -3968,6 +4006,15 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
      */
     final public TCPConnectionContext getTSC() {
         return this.myTSC;
+    }
+
+    /**
+     * Query the TCP service context value.
+     *
+     * @return TCPConnectionContext
+     */
+    final protected void setTSC(TCPConnectionContext TSC) {
+        this.myTSC = TSC;
     }
 
     /**

@@ -22,6 +22,7 @@ import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
 import com.ibm.ws.transport.access.TransportConstants;
 import com.ibm.ws.webcontainer31.osgi.osgi.WebContainerConstants;
+import com.ibm.ws.webcontainer31.osgi.response.WCOutputStream31;
 import com.ibm.ws.webcontainer31.srt.SRTUpgradeInputStream31;
 import com.ibm.ws.webcontainer31.srt.SRTUpgradeOutputStream31;
 import com.ibm.ws.webcontainer31.util.UpgradeInputByteBufferUtil;
@@ -30,6 +31,9 @@ import com.ibm.wsspi.channelfw.ConnectionLink;
 import com.ibm.wsspi.channelfw.VirtualConnection;
 import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
 import com.ibm.wsspi.webcontainer.servlet.IExtendedRequest;
+import com.ibm.wsspi.webcontainer.servlet.IExtendedResponse;
+
+import io.netty.channel.Channel;
 
 /**
  * @author Administrator
@@ -136,7 +140,7 @@ public class UpgradedWebConnectionImpl implements WebConnection {
                     }
                 }          
 
-                if(_in != null && (_in.getInputBufferHelper().get_tcpChannelCallback() != null)){
+                if(_in != null && (_in.getInputBufferHelper() != null) && (_in.getInputBufferHelper().get_tcpChannelCallback() != null)){
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(tc, " input callback");
                     }
@@ -188,7 +192,7 @@ public class UpgradedWebConnectionImpl implements WebConnection {
             closeUpgradeException = ioe;
         }
 
-        if(_outbb.isOutputStream_closed()) {
+        if( _outbb != null && _outbb.isOutputStream_closed()) {
             try {
                 // now call close on dispatcherlink
                 if(hasOutputCallback_CloseLinkHere || inputCallback){                        
@@ -228,7 +232,7 @@ public class UpgradedWebConnectionImpl implements WebConnection {
 
             //create the inputstream 
             _in = new SRTUpgradeInputStream31();       
-            _inbb = new UpgradeInputByteBufferUtil(this);
+            _inbb = new UpgradeInputByteBufferUtil(this, this.getTCPConnectionContext());
             _in.init(_inbb);
         }
         return _in;
@@ -245,7 +249,7 @@ public class UpgradedWebConnectionImpl implements WebConnection {
         if(_out == null ){
             //create the outputstream 
             _out = new SRTUpgradeOutputStream31();       
-            _outbb = new UpgradeOutputByteBufferUtil(this);
+            _outbb = new UpgradeOutputByteBufferUtil(this, this.getTCPConnectionContext());
             _out.init(_outbb,_req);
         }
         return _out;
@@ -315,5 +319,98 @@ public class UpgradedWebConnectionImpl implements WebConnection {
 
     public void setOutputStream_CloseStartedFromWC(boolean outputStream_CloseStartedFromWC) {
         this.outputStream_CloseStartedFromWC = outputStream_CloseStartedFromWC;
+    }
+    
+    public static class NettyUpgradedWebConnectionImpl extends UpgradedWebConnectionImpl{
+        
+        //Input
+//        private SRTUpgradeInputStream31 _in;
+//
+//        //Output
+//        protected WCOutputStream31 _out;
+//        
+//        private IExtendedResponse _res;
+        private IExtendedRequest _req;
+        private Channel nettyChannel;
+
+        /**
+         * @param req
+         * @param upgradeHandler
+         */
+        public NettyUpgradedWebConnectionImpl(IExtendedRequest req, IExtendedResponse res, HttpUpgradeHandlerWrapper upgradeHandler, Channel channel) {
+            super(req, upgradeHandler);
+//            _res = res;
+            this.nettyChannel = channel;
+            _req = req;
+        }
+        
+//        @Override
+//        public ServletInputStream getInputStream() throws IOException {
+//            if(_in == null){
+//                //create the inputstream 
+//                _in = new SRTUpgradeInputStream31.NettyUpgradeInputStream31();  
+//                _in.init(_req.getInputStream());
+//                super._in = _in;
+//            }
+//            return _in;
+//        }
+//        
+//        @Override
+//        public ServletOutputStream getOutputStream() throws IOException {
+//            if(_out == null){
+//                //create the inputstream 
+//                _out = (WCOutputStream31)_res.getOutputStream();
+//            }
+//            return _out;
+//        }
+        
+        /*
+         * (non-Javadoc)
+         * 
+         * @see javax.servlet.http.WebConnection#getInputStream()
+         */
+        @Override
+        public ServletInputStream getInputStream() throws IOException {    
+
+            if(super._in == null){
+
+                //create the inputstream 
+                super._in = new SRTUpgradeInputStream31();       
+                super._inbb = new UpgradeInputByteBufferUtil.NettyUpgradeInputByteBufferUtil(this, nettyChannel);
+                super._in.init(super._inbb);
+            }
+            return super._in;
+        }
+
+        /*
+         * (non-Javadoc)
+         * 
+         * @see javax.servlet.http.WebConnection#getOutputStream()
+         */
+        @Override
+        public ServletOutputStream getOutputStream() throws IOException {
+
+            if(_out == null ){
+                //create the outputstream 
+                _out = new SRTUpgradeOutputStream31();       
+                _outbb = new UpgradeOutputByteBufferUtil.NettyUpgradeOutputByteBufferUtil(this, nettyChannel);
+                _out.init(_outbb,_req);
+            }
+            return _out;
+        }
+        
+        @Override
+        public TCPConnectionContext getTCPConnectionContext() {
+            throw new UnsupportedOperationException("getTCPConnectionContext not valid in Netty context!!");
+        }
+        
+        @Override
+        protected void closeOutputandConnection() {
+            // TODO Auto-generated method stub
+            super.closeOutputandConnection();
+//            System.out.println("Finished! Closing connection!");
+//            this.nettyChannel.close();
+        }
+        
     }
 }

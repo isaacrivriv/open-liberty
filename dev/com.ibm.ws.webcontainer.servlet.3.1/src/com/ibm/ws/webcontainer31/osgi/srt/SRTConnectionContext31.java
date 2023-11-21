@@ -24,6 +24,7 @@ import javax.servlet.http.HttpUpgradeHandler;
 
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
+import com.ibm.ws.http.dispatcher.internal.channel.HttpDispatcherLink;
 import com.ibm.ws.transport.access.TransportConnectionAccess;
 import com.ibm.ws.transport.access.TransportConnectionUpgrade;
 import com.ibm.ws.transport.access.TransportConstants;
@@ -42,6 +43,8 @@ import com.ibm.wsspi.channelfw.ConnectionLink;
 import com.ibm.wsspi.channelfw.VirtualConnection;
 import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
 import com.ibm.wsspi.webcontainer.WebContainerRequestState;
+
+import io.netty.channel.Channel;
 
 
 public class SRTConnectionContext31 extends com.ibm.ws.webcontainer.osgi.srt.SRTConnectionContext
@@ -77,6 +80,7 @@ public class SRTConnectionContext31 extends com.ibm.ws.webcontainer.osgi.srt.SRT
             
             //findbugs says that _request is always an instanceof SRTServletRequest31, so just cast for now
             //if (_request instanceof SRTServletRequest31 && ((SRTServletRequest31)_request).isUpgradeInProgress()) {
+            IResponse31Impl irImpl = (IResponse31Impl)_response.getIResponse();
             if (((SRTServletRequest31)_request).isUpgradeInProgress()) {
                 boolean doInit = false;
                 boolean doUpgradeInit = false;
@@ -87,7 +91,7 @@ public class SRTConnectionContext31 extends com.ibm.ws.webcontainer.osgi.srt.SRT
                 VirtualConnection vc = null;
                 try {                   
                     TCPConnectionContext tcc = null;                   
-                    IResponse31Impl irImpl = (IResponse31Impl)_response.getIResponse();
+                    
 
                     tcc = irImpl.getTCPConnectionContext();
                     cldevice = irImpl.getDeviceConnectionLink();                     
@@ -118,29 +122,62 @@ public class SRTConnectionContext31 extends com.ibm.ws.webcontainer.osgi.srt.SRT
                     }
                     else{
                      // create the WebConnection and pass the handler generated
-                        upgradedCon = new UpgradedWebConnectionImpl(_request, new HttpUpgradeHandlerWrapper(_dispatchContext.getWebApp(), handler));
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(tc, "finishConnection  webconnection from upgradeHandler "+ upgradedCon.toString());
-                            Tr.debug(tc, "tcc -->"+ tcc +" ,cldevice -->" + cldevice);
-                        }
-                        if(tcc != null) {
-                            
+                        HttpDispatcherLink link = (HttpDispatcherLink) irImpl.getHttpDispatcherLink();
+                        if(link.isUsingNetty()) {
+//                            link.decoupleClose();
+                            link.prepareForUpgrade();
                             dispatcherLink = irImpl.getHttpDispatcherLink();
                             clLink = irImpl.getConnLink();
-                            
-                            upgradedCon.setTCPConnectionContext(tcc);                           
-                            upgradedCon.setDeviceConnLink(cldevice);   
-                            upgradedCon.setConnLink(clLink);
-                            upgradedCon.setHttpDisapctherConnLink(dispatcherLink);   
-                            
-                            vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "true");
-                            // remove the TransportConstants which if added for Upgrade previously
-                            vc.getStateMap().put(TransportConstants.CLOSE_UPGRADED_WEBCONNECTION, null);
-                            vc.getStateMap().put(TransportConstants.UPGRADED_LISTENER, null);
-                            
-                            upgradedCon.setVirtualConnection(vc);
+                            // If Netty, we need to clean the pipeline to remove everything after the HTTP Codec
+                            // and just stay with the plain channel
+                            // add in the conversion from Netty byte buff to WsByteBuff
+                            // and customer upgrade handler to do call backs and everything
+                            // Reuse the read/write callbacks for everything else
+//                            Channel channel = link.getUpgradedChannel();
+//                            System.out.println(channel.pipeline().names());
+//                            upgradedCon = new UpgradedWebConnectionImpl.NettyUpgradedWebConnectionImpl(_request, _response, new HttpUpgradeHandlerWrapper(_dispatchContext.getWebApp(), handler), channel);
+//                            
+//                            dispatcherLink = irImpl.getHttpDispatcherLink();
+//                            clLink = irImpl.getConnLink();
+//                            // TODO Check if we need to add this here
+//                            upgradedCon.setDeviceConnLink(cldevice);   
+//                            upgradedCon.setConnLink(clLink);
+//                            upgradedCon.setHttpDisapctherConnLink(dispatcherLink);   
+//                            
+//                            vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "true");
+//                            // remove the TransportConstants which if added for Upgrade previously
+//                            vc.getStateMap().put(TransportConstants.CLOSE_UPGRADED_WEBCONNECTION, null);
+//                            vc.getStateMap().put(TransportConstants.UPGRADED_LISTENER, null);
+//                            
+//                            upgradedCon.setVirtualConnection(vc);
+//                            doUpgradeInit = true;
 
-                            doUpgradeInit = true;
+                        }else {
+                         // Else do the legacy track
+                            upgradedCon = new UpgradedWebConnectionImpl(_request, new HttpUpgradeHandlerWrapper(_dispatchContext.getWebApp(), handler));
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                Tr.debug(tc, "finishConnection  webconnection from upgradeHandler "+ upgradedCon.toString());
+                                Tr.debug(tc, "tcc -->"+ tcc +" ,cldevice -->" + cldevice);
+                            }
+                            if(tcc != null) {
+                                
+                                dispatcherLink = irImpl.getHttpDispatcherLink();
+                                clLink = irImpl.getConnLink();
+                                
+                                upgradedCon.setTCPConnectionContext(tcc);                           
+                                upgradedCon.setDeviceConnLink(cldevice);   
+                                upgradedCon.setConnLink(clLink);
+                                upgradedCon.setHttpDisapctherConnLink(dispatcherLink);   
+                                
+                                vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "true");
+                                // remove the TransportConstants which if added for Upgrade previously
+                                vc.getStateMap().put(TransportConstants.CLOSE_UPGRADED_WEBCONNECTION, null);
+                                vc.getStateMap().put(TransportConstants.UPGRADED_LISTENER, null);
+                                
+                                upgradedCon.setVirtualConnection(vc);
+
+                                doUpgradeInit = true;
+                            }
                         }
                     }                    
                 }
@@ -152,9 +189,40 @@ public class SRTConnectionContext31 extends com.ibm.ws.webcontainer.osgi.srt.SRT
                 try
                 {
                     ((SRTServletResponse31)_response).finishKeepConnection();
-                    // close the current httpinput and httpoutput streams as the response is written out. 
-                    if(dispatcherLink != null)
-                        dispatcherLink.close(vc, null);
+                    // close the current httpinput and httpoutput streams as the response is written out.
+                    // TODO I think we need to check on Netty to verify that the channel is still open
+                    if(dispatcherLink != null) {
+                        HttpDispatcherLink link = (HttpDispatcherLink) irImpl.getHttpDispatcherLink();
+                        if(link.isUsingNetty()) {
+                            System.out.println("Using Netty in upgrade!");
+                            vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "true");
+                            // remove the TransportConstants which if added for Upgrade previously
+                            vc.getStateMap().put(TransportConstants.CLOSE_UPGRADED_WEBCONNECTION, null);
+                            vc.getStateMap().put(TransportConstants.UPGRADED_LISTENER, null);
+                            // Flush data as http and keep channel open
+                            System.out.println("Before close");
+                            dispatcherLink.close(vc, null);
+                            System.out.println("After close");
+                            Channel channel = link.getUpgradedChannel();
+                            System.out.println(channel.pipeline().names());
+                            upgradedCon = new UpgradedWebConnectionImpl.NettyUpgradedWebConnectionImpl(_request, _response, new HttpUpgradeHandlerWrapper(_dispatchContext.getWebApp(), handler), channel);
+                            
+                            dispatcherLink = link;
+                            clLink = irImpl.getConnLink();
+                            // TODO Check if we need to add this here
+                            upgradedCon.setDeviceConnLink(irImpl.getDeviceConnectionLink());   
+                            upgradedCon.setConnLink(clLink);
+                            upgradedCon.setHttpDisapctherConnLink(dispatcherLink);   
+                            
+                            upgradedCon.setVirtualConnection(vc);
+                            doUpgradeInit = true;
+                        }else {
+                            System.out.println("Not using netty");
+                            dispatcherLink.close(vc, null);
+                        }
+                    }else {
+                        System.out.println("Not using Netty or dispatcher link null: "+dispatcherLink);
+                    }
                     
                     if (doInit) {
                         ((TransportConnectionUpgrade) handler).init((TransportConnectionAccess) connection);

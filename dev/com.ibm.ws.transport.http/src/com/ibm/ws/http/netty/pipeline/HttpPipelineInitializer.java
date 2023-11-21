@@ -317,7 +317,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
             pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new LibertyHttpObjectAggregator(maxContentLength));
         }
 
-        //pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new HttpObjectAggregator(maxContentLength);
+        //pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new HttpObjectAggregator(Integer.MAX_VALUE);
         //pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new HttpObjectAggregator(64 * 1024));
         pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new ChunkSizeLoggingHandler());
         pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new ChunkedWriteHandler());

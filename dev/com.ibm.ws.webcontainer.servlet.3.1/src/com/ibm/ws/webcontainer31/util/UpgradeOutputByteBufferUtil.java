@@ -13,17 +13,22 @@
 package com.ibm.ws.webcontainer31.util;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.util.concurrent.TimeUnit;
 
 import javax.servlet.WriteListener;
 
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
 import com.ibm.ws.ffdc.annotation.FFDCIgnore;
+import com.ibm.ws.http.dispatcher.internal.HttpDispatcher;
+import com.ibm.ws.http2.upgrade.ServletUpgradeHandler;
 import com.ibm.ws.transport.access.TransportConstants;
 import com.ibm.ws.webcontainer31.osgi.osgi.WebContainerConstants;
 import com.ibm.ws.webcontainer31.osgi.response.BlockingWriteNotAllowedException;
 import com.ibm.ws.webcontainer31.upgrade.UpgradedWebConnectionImpl;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
+import com.ibm.wsspi.bytebuffer.WsByteBufferUtils;
 import com.ibm.wsspi.channelfw.ChannelFrameworkFactory;
 import com.ibm.wsspi.channelfw.VirtualConnection;
 import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
@@ -31,6 +36,13 @@ import com.ibm.wsspi.tcpchannel.TCPWriteCompletedCallback;
 import com.ibm.wsspi.tcpchannel.TCPWriteRequestContext;
 import com.ibm.wsspi.webcontainer.WebContainerRequestState;
 import com.ibm.wsspi.webcontainer31.WCCustomProperties31;
+
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.handler.timeout.WriteTimeoutHandler;
 
 /**
  * This class is an helper class for the Upgraded Output Stream as it implements the buffer logic for write.
@@ -94,7 +106,16 @@ public class UpgradeOutputByteBufferUtil {
      */
     public UpgradeOutputByteBufferUtil(UpgradedWebConnectionImpl up) {        
         _upConn = up;
-        _tcpContext = _upConn.getTCPConnectionContext();
+        _vc = _upConn.getVirtualConnection();
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
+        {  
+            Tr.debug(tc, "constructor");         
+        }       
+    }
+    
+    public UpgradeOutputByteBufferUtil(UpgradedWebConnectionImpl up, TCPConnectionContext tcpContext) {        
+        _upConn = up;
+        _tcpContext = tcpContext;
         _vc = _upConn.getVirtualConnection();
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
         {  
@@ -253,12 +274,14 @@ public class UpgradeOutputByteBufferUtil {
         }
         if (this._bytesRemainingWhenAsync > 0) {
             // Make sure complete is not called faster on another thread before remaining data is saved of
+            System.out.println("Before wait!");
             synchronized(this._lockObj) {    
                 if (!this.isDataSaved()) {
-                    this._lockObj.wait();                    
+                    this._lockObj.wait(5000);                    
                 }
                 this.setDataSaved(false);            
             }
+            System.out.println("After wait!");
             this.setInternalReady(true);
             this.writeToBuffers(this._remValue, 0, this._bytesRemainingWhenAsync);
         }
@@ -426,7 +449,7 @@ public class UpgradeOutputByteBufferUtil {
      * @throws IOException
      */
     @FFDCIgnore({ IOException.class })
-    private void flushUpgradedOutputBuffers() throws IOException {
+    protected void flushUpgradedOutputBuffers() throws IOException {
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "flushUpgraded: Flushing buffers for Upgraded output: " + this);
@@ -443,6 +466,7 @@ public class UpgradeOutputByteBufferUtil {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "flushUpgraded:: Now write the content ");
                 }
+                System.out.println(WsByteBufferUtils.asString(content));
                 _tcpContext.getWriteInterface().setBuffers(content);
                 _tcpContext.getWriteInterface().write(TCPWriteRequestContext.WRITE_ALL_DATA, WCCustomProperties31.UPGRADE_WRITE_TIMEOUT);
             }
@@ -492,7 +516,7 @@ public class UpgradeOutputByteBufferUtil {
      * 
      * @throws IOException
      */
-    private void flushAsyncUpgradedOutputBuffers() throws IOException {
+    protected void flushAsyncUpgradedOutputBuffers() throws IOException {
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "flushAsyncUpgraded: Flushing async buffers  for Upgraded output: " + this);
@@ -511,6 +535,7 @@ public class UpgradeOutputByteBufferUtil {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "flushAsyncUpgraded: Now write it out to TCP");
                 }
+                System.out.println(WsByteBufferUtils.asString(content));
                 _tcpContext.getWriteInterface().setBuffers(content);
 
                 _vcWrite =_tcpContext.getWriteInterface().write(TCPWriteRequestContext.WRITE_ALL_DATA, _callback, false, WCCustomProperties31.UPGRADE_WRITE_TIMEOUT);
@@ -794,6 +819,256 @@ public class UpgradeOutputByteBufferUtil {
      */
     public void set_asyncFlushCalledFromCloseWork(boolean _asyncFlushCalledFromCloseWork) {
         this._asyncFlushCalledFromCloseWork = _asyncFlushCalledFromCloseWork;
+    }
+    
+    public static class NettyUpgradeOutputByteBufferUtil extends UpgradeOutputByteBufferUtil{
+        
+        private Channel nettychannel;
+        
+        private ServletUpgradeHandler upgradeHandler;
+        
+
+        /**
+         * @param up
+         */
+        public NettyUpgradeOutputByteBufferUtil(UpgradedWebConnectionImpl up, Channel channel) {
+            super(up);
+            // TODO Auto-generated constructor stub
+            this.nettychannel = channel;
+            upgradeHandler = channel.pipeline().get(ServletUpgradeHandler.class);
+            if(upgradeHandler == null) {
+                throw new UnsupportedOperationException("Can't work without upgrade handler!!");
+            }
+            System.out.println("Adding write timeout handler with timeout: " + WCCustomProperties31.UPGRADE_WRITE_TIMEOUT);
+            channel.pipeline().addBefore(channel.pipeline().context(upgradeHandler).name(), null, new WriteTimeoutHandler((WCCustomProperties31.UPGRADE_WRITE_TIMEOUT<0)?0:WCCustomProperties31.UPGRADE_WRITE_TIMEOUT, TimeUnit.MILLISECONDS) {
+                @Override
+                protected void writeTimedOut(ChannelHandlerContext ctx) throws Exception {
+                    System.out.println("Write timeout!!");
+                    if(getWriteListenerCallBack() != null) {
+                        System.out.println("Calling callback for write timeout!");
+                        getWriteListenerCallBack().error(get_vc(), null, new SocketTimeoutException("Socket operation timed out before it could be completed local="+ctx.channel().localAddress()+" remote="+ctx.channel().remoteAddress()));
+                    }
+                    System.out.println("Finished write timeout!!");
+//                    ctx.close();
+                }
+            });
+        }
+        
+        @Override
+        public boolean isWriteReadyForApp() {
+            // TODO Auto-generated method stub
+            System.out.println("Is ready?!?: "+super.isWriteReadyForApp());
+            return super.isWriteReadyForApp();
+//            System.out.println("Is ready?!?: "+nettychannel.isWritable());
+//            return nettychannel.isWritable();
+        }
+        
+        // Similar to writeToBuffers
+        @Override
+        protected void flushUpgradedOutputBuffers() throws IOException{
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(tc, "flushUpgraded: Flushing buffers for Upgraded output: " + this);
+            }
+            final boolean writingBody = (super.hasBufferedContent());
+            // flip the last buffer for the write...
+            if (writingBody && null != super._output[super.outputIndex]) {
+                super._output[super.outputIndex].flip();
+            }
+            try {
+                WsByteBuffer[] content = (writingBody) ? super._output : null;
+                // write it out to TCP            
+                if(content != null) {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "flushUpgraded:: Now write the content ");
+                    }
+                    System.out.println(WsByteBufferUtils.asString(content));
+                    // Synchronous write
+                    ChannelFuture future = null;
+                    for(WsByteBuffer buff : content) {
+                        // Bad since this is duplicating data
+                        if(buff == null) { // In TCPBaseRequestContext when setting buffers it sets until the first null buffer
+                            System.out.println("Found null buffer! Stopping write!");
+                            break;
+                        }
+                        if(buff.remaining() == 0) { // No bytes to write
+                            System.out.println("No bytes to write, continuing!");
+                            continue;
+                        }
+                        System.out.println("Writing content!: "+WsByteBufferUtils.asString(buff));
+//                        future = this.nettychannel.writeAndFlush(Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buff)));
+                        // Skip every other handler and write from Upgrade Handler
+                        future = this.nettychannel.pipeline().context(upgradeHandler).writeAndFlush(Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buff)));
+                    }
+                    if(future != null)// else nothing to write
+                        future.await(WCCustomProperties31.UPGRADE_WRITE_TIMEOUT);
+//                    _tcpContext.getWriteInterface().setBuffers(content);
+//                    _tcpContext.getWriteInterface().write(TCPWriteRequestContext.WRITE_ALL_DATA, WCCustomProperties31.UPGRADE_WRITE_TIMEOUT);
+                }
+                else{
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "flushUpgraded: No more data to flush ");
+                    } 
+                }
+
+            } catch (InterruptedException ie) {
+                super.error = new IOException(ie);
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "flushUpgraded: Received exception during write: " + ie);
+                }
+                throw super.error;
+            } finally {
+                super.bytesWritten += super.bufferedCount;            
+                super.bufferedCount = 0;
+                super.outputIndex = 0;
+                // Note: this logic only works for sync writes
+                if (writingBody) {
+                    if (null != super._output){
+                        if (null != super._output[0]) {
+                            super._output[0].clear();
+                        }
+                        for (int i = 1; i < super._output.length; i++) {
+                            if (null != super._output[i]) {
+                                // mark them empty so later writes don't mistake them
+                                // as having content
+                                super._output[i].position(0);
+                                super._output[i].limit(0);
+                            }
+                        }
+                    }
+                }
+                // disconnect write buffers in TCP when done
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "flushUpgraded: disconnect write buffers in TCP when done");
+                }
+                // Nothing to do on Netty
+//                _tcpContext.getWriteInterface().setBuffers(null);
+            }
+        }
+        
+        @Override
+        protected void flushAsyncUpgradedOutputBuffers() {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(tc, "flushAsyncUpgraded: Flushing async buffers  for Upgraded output: " + this);
+            }
+
+            final boolean writingBody = (super.hasBufferedContent());
+            // flip the last buffer for the write...
+            if (writingBody && null != super._output[super.outputIndex]) {
+                super._output[super.outputIndex].flip();
+            }
+//            VirtualConnection _vcWrite = null;
+            ChannelFuture writeFuture = null;
+            boolean wentAsync = false;
+            try {
+                WsByteBuffer[] content = (writingBody) ? super._output : null;
+                // write it out to TCP           
+                if(content != null) {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "flushAsyncUpgraded: Now write it out to TCP");
+                    }
+                    System.out.println(WsByteBufferUtils.asString(content));
+//                    _tcpContext.getWriteInterface().setBuffers(content);
+//
+//                    _vcWrite =_tcpContext.getWriteInterface().write(TCPWriteRequestContext.WRITE_ALL_DATA, _callback, false, WCCustomProperties31.UPGRADE_WRITE_TIMEOUT);
+//                    
+//                    if (_vcWrite == null) { // then we will have to wait for data to be written, async write in progress                                        
+//                        this.setInternalReady(false); // tell internal
+//                        this.setReadyForApp(false); // tell app
+//                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                            Tr.debug(tc, "flushAsyncUpgraded:  wait for data to be written, async write in progress, set ready to false");
+//                        }
+//                    }
+                    
+                    // Async write
+                    ChannelFuture future = null;
+                    for(WsByteBuffer buff : content) {
+                        // Bad since this is duplicating data
+                        if(buff == null) { // In TCPBaseRequestContext when setting buffers it sets until the first null buffer
+                            System.out.println("Found null buffer! Stopping write!");
+                            break;
+                        }
+                        if(buff.remaining() == 0) { // No bytes to write
+                            System.out.println("No bytes to write, continuing!");
+                            continue;
+                        }
+                        System.out.println("Writing content!: "+WsByteBufferUtils.asString(buff));
+//                        future = this.nettychannel.writeAndFlush(Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buff)));
+                        // Skip every other handler and write from Upgrade Handler
+                        future = this.nettychannel.pipeline().context(upgradeHandler).writeAndFlush(Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buff)));
+                    }
+                    if(future != null){// else nothing to write
+                        if(!future.isDone()) {
+                            System.out.println("Not done yet! Need to add listener and set not ready");
+                            wentAsync = true;
+                            this.setInternalReady(false); // tell internal
+                            this.setReadyForApp(false); // tell app
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                Tr.debug(tc, "flushAsyncUpgraded:  wait for data to be written, async write in progress, set ready to false");
+                            }
+                            future.addListener(f -> {
+                                if(f.isDone() && f.isSuccess()) {
+                                    if(getWriteListenerCallBack() != null)
+                                        getWriteListenerCallBack().complete(get_vc(), null);
+                                    else
+                                        System.out.println("Callback completed but no callback called");
+                                }else {
+                                    if(getWriteListenerCallBack() != null)
+                                        getWriteListenerCallBack().error(get_vc(), null, new IOException(f.cause()));
+                                    else
+                                        System.out.println("Callback failed but no callback called");
+                                }
+//                                super.clearBuffersAfterWrite();
+//                                setInternalReady(true); // tell internal
+//                                setReadyForApp(true); // tell app
+                                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                    Tr.debug(tc, "flushAsyncUpgraded:  data already written, set ready to true");
+                                }
+                            });
+                        }else {
+                            System.out.println("All data was flushed instantly!");
+                        }
+                        
+                    }
+                    
+//                    writeFuture = this.nettychannel.writeAndFlush(content).addListener(f -> {
+//                        if(f.isDone() && f.isSuccess()) {
+//                            _callback.complete(get_vc(), null);
+//                        }else {
+//                            _callback.error(get_vc(), null, new IOException(f.cause()));
+//                        }
+//                        super.clearBuffersAfterWrite();
+//                    });
+//                    
+//                    if(!writeFuture.isDone()) {
+//                        this.setInternalReady(false); // tell internal
+//                        this.setReadyForApp(false); // tell app
+//                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                            Tr.debug(tc, "flushAsyncUpgraded:  wait for data to be written, async write in progress, set ready to false");
+//                        }
+//                    }
+                    
+                    
+                }
+                else{
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "flushAsyncUpgraded: No more data to flush ");
+                    } 
+                }        
+            } finally {
+                super.bytesWritten += super.bufferedCount;            
+                super.bufferedCount = 0;
+                super.outputIndex = 0;
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "flushAsyncUpgraded: finally, this " + this + " , bytesWritten -->" + super.bytesWritten);
+                }
+                if (writingBody && !wentAsync) {
+                    super.clearBuffersAfterWrite();
+                }
+            }
+        }
+        
+        
+        
     }
 
 

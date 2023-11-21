@@ -804,14 +804,18 @@ public class NettyResponseMessage extends NettyBaseMessage implements HttpRespon
     protected void processCookie(HttpCookie cookie, HeaderKeys header) {
         String result = null;
         if (Objects.nonNull(cookie) && Objects.nonNull(header)) {
+            System.out.println("In processing cookie");
             result = CookieEncoder.INSTANCE.encode(cookie, header, config);
-
+            System.out.println("Encoded result: " + result);
             if (Objects.nonNull(result)) {
                 if (config.doNotAllowDuplicateSetCookies() && header.equals(HttpHeaderKeys.HDR_SET_COOKIE)) {
+                    System.out.println("In do not allow duplicate cookies");
                     if (this.headers.contains(HttpHeaderKeys.HDR_SET_COOKIE.getName())) {
+                        System.out.println("Setting header");
                         headers.set(header.getName(), result);
                     }
                 } else {
+                    System.out.println("Adding header");
                     headers.add(header.getName(), result);
                 }
             }
