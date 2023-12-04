@@ -33,6 +33,8 @@ public class LibertyHttpObjectAggregator extends SimpleChannelInboundHandler<Htt
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) throws Exception {
         if (msg instanceof HttpRequest) {
+            if (msg.decoderResult().isFinished() && msg.decoderResult().isFailure())
+                exceptionCaught(ctx, msg.decoderResult().cause());
             HttpRequest request = (HttpRequest) msg;
             ctx.channel().attr(CURRENT_REQUEST).set(request);
 

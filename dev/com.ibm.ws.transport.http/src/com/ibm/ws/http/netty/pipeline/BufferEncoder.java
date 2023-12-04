@@ -15,7 +15,6 @@ import java.util.List;
 import com.ibm.ws.http.netty.MSP;
 import com.ibm.ws.http.netty.NettyHttpConstants;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
-import com.ibm.wsspi.bytebuffer.WsByteBufferUtils;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -53,7 +52,7 @@ public class BufferEncoder extends MessageToMessageEncoder<AbstractMap.SimpleEnt
         bytesWritten += message.remaining();
 
         MSP.log("Encode: bytes written: " + bytesWritten + ", bytes to write: " + message.remaining());
-        System.out.println("Encode Got content: " + WsByteBufferUtils.asString(message));
+//        System.out.println("Encode Got content: " + WsByteBufferUtils.asString(message));
 
         // If "Content-Length" is set, check if it matches the bytes written
         if (hasContentLength) {

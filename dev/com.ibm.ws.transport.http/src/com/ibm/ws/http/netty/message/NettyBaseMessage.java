@@ -781,13 +781,14 @@ public class NettyBaseMessage implements HttpBaseMessage {
     @Override
     public void setTransferEncoding(TransferEncodingValues value) {
         // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Tried setting transfer encoding in Netty!");
 
     }
 
     @Override
     public void setTransferEncoding(TransferEncodingValues[] values) {
         // TODO Auto-generated method stub
-
+        throw new UnsupportedOperationException("Tried setting transfer encoding in Netty!");
     }
 
     @Override

@@ -225,6 +225,8 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
      */
     private void setupHttp11Pipeline(ChannelPipeline pipeline) {
         pipeline.addLast(NETTY_HTTP_SERVER_CODEC, new HttpServerCodec());
+//        pipeline.addLast(NETTY_HTTP_SERVER_CODEC,
+//                         new HttpServerCodec(HttpObjectDecoder.DEFAULT_MAX_INITIAL_LINE_LENGTH, httpConfig.getLimitOfFieldSize() * 2, httpConfig.getIncomingBodyBufferSize()));
         pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig));
         addPreHttpCodecHandlers(pipeline);
         addPreDispatcherHandlers(pipeline, false);
