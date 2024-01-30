@@ -4,7 +4,7 @@
  * are made available under the terms of the Eclipse Public License 2.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-2.0/
- * 
+ *
  * SPDX-License-Identifier: EPL-2.0
  *
  * Contributors:
@@ -34,7 +34,6 @@ import com.ibm.ws.wsoc.Constants;
 import com.ibm.ws.wsoc.HandshakeProcessor;
 import com.ibm.ws.wsoc.ParametersOfInterest;
 import com.ibm.ws.wsoc.WebSocketContainerManager;
-import com.ibm.ws.wsoc.WebSocketVersionServiceManager;
 import com.ibm.ws.wsoc.external.HandshakeResponseExt;
 import com.ibm.ws.wsoc.util.Utils;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
@@ -80,10 +79,12 @@ public class HttpRequestorWsoc10 implements HttpRequestor {
         this.things = things;
     }
 
+    @Override
     public ClientTransportAccess getClientTransportAccess() {
         return access;
     }
 
+    @Override
     public void connect() throws Exception {
 
         access = new ClientTransportAccess();
@@ -94,12 +95,14 @@ public class HttpRequestorWsoc10 implements HttpRequestor {
 
     }
 
+    @Override
     public void sendRequest() throws IOException, MessageSentException {
         sendRequest(null);
     }
 
     private final Map<String, List<String>> parameterMap = new HashMap<String, List<String>>();
 
+    @Override
     public void sendRequest(ParametersOfInterest poi) throws IOException, MessageSentException {
 
         httpOutboundSC = (HttpOutboundServiceContext) vc.getChannelAccessor();
@@ -199,10 +202,12 @@ public class HttpRequestorWsoc10 implements HttpRequestor {
         // client side needs to store query string and path parameters for later retrieval from the session object
         if (poi != null) {
             Tr.debug(tc, "set query parms to " + endpointAddress.getURI().getQuery());
+            System.out.println("set query parms to " + endpointAddress.getURI().getQuery());
             poi.setQueryString(endpointAddress.getURI().getQuery());
 
             if (hrm != null) {
                 Map<String, String[]> paramMap = hrm.getParameterMap();
+                System.out.println(paramMap);
                 for (Map.Entry<String, String[]> entry : paramMap.entrySet()) {
                     String key = entry.getKey();
                     String[] value = entry.getValue();
@@ -216,6 +221,7 @@ public class HttpRequestorWsoc10 implements HttpRequestor {
         }
     }
 
+    @Override
     public WsByteBuffer completeResponse() throws IOException {
         HttpResponseMessage hrm = httpOutboundSC.getResponse();
 
