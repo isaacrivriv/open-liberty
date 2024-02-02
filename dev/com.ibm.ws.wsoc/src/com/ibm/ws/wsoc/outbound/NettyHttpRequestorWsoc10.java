@@ -439,6 +439,7 @@ public class NettyHttpRequestorWsoc10 implements HttpRequestor {
                 pipeline.addFirst("SSLHandler", new SslHandler(engine, false));
 
             }
+            ch.attr(NettyTCPConnectionContext.IS_OUTBOUND_KEY).set(true);
             // ADD HTTP CODEC for first upgrade request
             pipeline.addLast(new HttpClientCodec());
             pipeline.addLast(new HttpObjectAggregator(Integer.MAX_VALUE));
