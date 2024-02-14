@@ -56,6 +56,7 @@ public class HttpChain implements ChainEventListener {
         QUIESCED(4, "QUIESCED"),
         STARTED(5, "STARTED"),
         RESTARTING(6, "RESTARTING"),
+        STARTING(8, "STARTING"),
         STOPPING(7, "STOPPING");
 
         public final int val;
@@ -260,6 +261,7 @@ public class HttpChain implements ChainEventListener {
      */
     @FFDCIgnore({ ChannelException.class, ChainException.class })
     public synchronized void update(String resolvedHostName) {
+        new Exception().printStackTrace();
         if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
             Tr.event(this, tc, "update chain " + this);
         }
@@ -534,6 +536,7 @@ public class HttpChain implements ChainEventListener {
 
                 // We configured the chain successfully
                 newConfig.validConfiguration = true;
+                System.out.println("After update");
             } catch (ChannelException e) {
                 handleStartupError(e, newConfig); // FFDCIgnore: CFW will have logged and FFDCd already
             } catch (ChainException e) {

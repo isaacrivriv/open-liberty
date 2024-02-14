@@ -105,6 +105,7 @@ public class TCPUtils {
         final String newHost = inetHost;
 
         openFuture.addListener(future -> {
+        	System.out.println("Future! "+future+ " isDone: "+future.isDone()+ " isSucess: "+future.isSuccess()+ " isCancelled: "+future.isCancelled()+ " cause: "+future.cause());
             if (future.isSuccess()) {
 
                 // add new channel to set of active channels, and set a close future to
@@ -164,11 +165,15 @@ public class TCPUtils {
                                 new Object[] { config.getExternalName(), hostLogString, String.valueOf(inetPort) });
                     }
                 }
+            } else if(future.isCancelled()) {
+            	System.out.println("Cancel culture strikes again!");
+            	System.out.println("Channel:"+ openFuture.channel() + " isOpen: " + ((openFuture.channel() == null) ? false: openFuture.channel().isOpen()));
             } else {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc,
                             "open failed for " + config.getExternalName() + " due to: " + future.cause().getMessage());
                 }
+                System.out.println("Open failed: "+openFuture.channel());
 
                 if (retryCount > 0) {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -214,8 +219,12 @@ public class TCPUtils {
                 return framework.runWhenServerStarted(new Callable<ChannelFuture>() {
                     @Override
                     public ChannelFuture call() {
-                        return open(framework, bootstrap, config, inetHost, inetPort, openListener,
+                    	ChannelFuture future = open(framework, bootstrap, config, inetHost, inetPort, openListener,
                                 config.getPortOpenRetries());
+                    	System.out.println("In call: "+future.channel());
+                    	System.out.println("In call: "+future.channel().isRegistered());
+                    	System.out.println("In call: "+future.channel().isOpen());
+                        return future;
                     }
                 });
             } catch (Exception e) {
@@ -306,6 +315,7 @@ public class TCPUtils {
                 Tr.debug(tc, TCPMessageConstants.TCP_CHANNEL_STARTED,
                         new Object[] { channelName, host, String.valueOf(port) });
         }
+        System.out.println(channel);
     }
 
 }

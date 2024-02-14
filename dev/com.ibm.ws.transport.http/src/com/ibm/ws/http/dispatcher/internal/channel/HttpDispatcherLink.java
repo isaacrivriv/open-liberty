@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import javax.net.ssl.SSLSession;
+
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
 import com.ibm.websphere.ras.annotation.Trivial;
@@ -41,6 +43,7 @@ import com.ibm.ws.http.channel.internal.inbound.HttpInboundServiceContextImpl;
 import com.ibm.ws.http.channel.internal.inbound.HttpInputStreamImpl;
 import com.ibm.ws.http.dispatcher.classify.DecoratedExecutorThread;
 import com.ibm.ws.http.dispatcher.internal.HttpDispatcher;
+import com.ibm.ws.http.dispatcher.internal.channel.HttpDispatcherLink.TaskWrapper;
 import com.ibm.ws.http.internal.VirtualHostImpl;
 import com.ibm.ws.http.internal.VirtualHostMap;
 import com.ibm.ws.http.internal.VirtualHostMap.RequestHelper;
@@ -81,6 +84,7 @@ import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpServerKeepAliveHandler;
 import io.netty.handler.codec.http2.HttpConversionUtil;
 import io.netty.handler.codec.http2.HttpToHttp2ConnectionHandler;
+import io.netty.handler.ssl.SslHandler;
 
 /**
  * Connection link object that the HTTP dispatcher provides to CHFW
@@ -1392,7 +1396,58 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
 
         if (this.usingNetty) {
             //TODO: return null for now, connect to pipeline ssl
-            return null;
+            final SslHandler ssl = this.nettyContext.pipeline().get(SslHandler.class);
+            if (ssl == null)
+                return null;
+            return new SSLContext() {
+                /*
+                 * @see com.ibm.websphere.http.SSLContext#getEnabledCipherSuites()
+                 */
+                @Override
+                public String[] getEnabledCipherSuites() {
+                    return ssl.engine().getEnabledCipherSuites();
+                }
+
+                /*
+                 * @see com.ibm.websphere.http.SSLContext#getEnabledProtocols()
+                 */
+                @Override
+                public String[] getEnabledProtocols() {
+                    return ssl.engine().getEnabledProtocols();
+                }
+
+                /*
+                 * @see com.ibm.websphere.http.SSLContext#getNeedClientAuth()
+                 */
+                @Override
+                public boolean getNeedClientAuth() {
+                    return ssl.engine().getNeedClientAuth();
+                }
+
+                /*
+                 * @see com.ibm.websphere.http.SSLContext#getSession()
+                 */
+                @Override
+                public SSLSession getSession() {
+                    return ssl.engine().getSession();
+                }
+
+                /*
+                 * @see com.ibm.websphere.http.SSLContext#getUseClientMode()
+                 */
+                @Override
+                public boolean getUseClientMode() {
+                    return ssl.engine().getUseClientMode();
+                }
+
+                /*
+                 * @see com.ibm.websphere.http.SSLContext#getWantClientAuth()
+                 */
+                @Override
+                public boolean getWantClientAuth() {
+                    return ssl.engine().getWantClientAuth();
+                }
+            };
         } else {
             if (this.sslinfo == null &&
                 this.isc != null &&
@@ -1677,23 +1732,24 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         VirtualConnection vc = link.getVirtualConnection();
         H2InboundLink h2Link = new H2InboundLink(channel, vc, getTCPConnectionContext());
         boolean bodyReadAndQueued = false;
-        if(this.isc != null) {
-            if(this.isc.isIncomingBodyExpected() && !this.isc.isBodyComplete()){
+        if (this.isc != null) {
+            if (this.isc.isIncomingBodyExpected() && !this.isc.isBodyComplete()) {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "Body needed for request. Queueing data locally before upgrade.");
                 }
                 HttpInputStreamImpl body = this.request.getBody();
                 body.setupChannelMultiRead();
                 byte[] inBytes = new byte[1024];
-                try{
+                try {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(tc, "Starting request read loop.");
                     }
-                    for (int n; (n = body.read(inBytes)) != -1;) {}
+                    for (int n; (n = body.read(inBytes)) != -1;) {
+                    }
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(tc, "Finished request read loop.");
                     }
-                }catch(Exception e){
+                } catch (Exception e) {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(tc, "Got exception reading request and queueing up data. Can't handle request upgrade to HTTP2.", e);
                     }
@@ -1703,12 +1759,12 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
                 }
                 body.setReadFromChannelComplete();
                 bodyReadAndQueued = true;
-            }else{
+            } else {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "No body needed for request. Continuing upgrade as normal.");
                 }
             }
-        }else {
+        } else {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "Failed to get isc, Null value received which could cause issues expecting data. Continuing upgrade as normal.");
             }
@@ -1727,7 +1783,7 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             // A problem occurred with the connection start up, a trace message will be issued from waitForConnectionInit()
             vc.getStateMap().put(h2InitError, true);
         }
-        if(bodyReadAndQueued)
+        if (bodyReadAndQueued)
             isc.setBodyComplete();
         return rc;
     }

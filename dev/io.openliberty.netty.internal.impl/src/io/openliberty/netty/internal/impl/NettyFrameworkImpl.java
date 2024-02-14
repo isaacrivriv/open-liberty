@@ -320,8 +320,10 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
             try {
             	if(!task.isCancelled()) {
             		executorService.submit(new StartTaskRunnable(task, latch));
-            	}else
+            	}else {
+            		System.out.println("Cancelled execution");
             		latch.countDown();
+            	}
             } catch (Exception e) {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "caught exception performing late cycle server startup task: " + e);
@@ -360,9 +362,12 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
 		@Override
 		public void run() {
 			// TODO Auto-generated method stub
+			System.out.println("Task: "+task + " isDone: "+task.isDone()+ " isCancelled: "+task.isCancelled());
 			task.run();
 			try {
+				System.out.println("Task get before");
 				task.get(getDefaultChainQuiesceTimeout(), TimeUnit.MILLISECONDS);
+				System.out.println("Task get after");
 			}catch (Exception e) {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "caught exception performing startup task: " + e);
@@ -389,7 +394,8 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
             if (!serverCompletelyStarted.get()) {
                 serverStartedTasks.add(future);
             }else {
-            	this.executorService.submit(future);
+//            	this.executorService.submit(future);
+            	future.run();
             }
             return future;
         }

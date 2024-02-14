@@ -346,6 +346,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
      */
     @Modified
     protected void modified(Map<String, Object> config) {
+        System.out.println("Modified hit");
         boolean endpointEnabled = MetatypeUtils.parseBoolean(HttpServiceConstants.ENPOINT_FPID_ALIAS,
                                                              HttpServiceConstants.ENABLED,
                                                              config.get(HttpServiceConstants.ENABLED),
@@ -415,8 +416,10 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         if ((CHFWBundle.isServerCompletelyStarted() != true) && (endpointEnabled == true)) {
             // SplitStartUp. Enabling during startup need this to stay on the same thread,
             // or else the port may listen after the server says it is ready
+            System.out.println("1st take");
             processHttpChainWork(endpointEnabled, true);
         } else {
+            System.out.println("2nd take");
             processHttpChainWork(endpointEnabled, false);
         }
     }

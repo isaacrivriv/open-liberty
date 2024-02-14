@@ -36,6 +36,7 @@ import io.netty.channel.ChannelFuture;
 import io.openliberty.netty.internal.ConfigConstants;
 import io.openliberty.netty.internal.NettyFramework;
 import io.openliberty.netty.internal.ServerBootstrapExtended;
+import io.openliberty.netty.internal.impl.NettyFrameworkImpl;
 
 /**
  *
@@ -49,7 +50,7 @@ public class NettyChain extends HttpChain {
     private volatile boolean enabled = false;
 
     ServerBootstrapExtended bootstrap = new ServerBootstrapExtended();
-    private Channel serverChannel;
+    private volatile Channel serverChannel;
     private HttpPipelineInitializer httpPipeline;
 
     private int stopCount = 0;
@@ -105,21 +106,39 @@ public class NettyChain extends HttpChain {
         }
 
         if (Objects.isNull(serverChannel)) {
-            chainState.set(ChainState.STOPPED.val);
             if (Objects.nonNull(channelFuture)) {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                     Tr.debug(tc, "Netty channel not initialized. Cancelling Future...");
-                channelFuture.cancel(true);
+//                boolean cancelled = false;
+//                try {
+//                    cancelled = channelFuture.get(nettyFramework.getDefaultChainQuiesceTimeout(), TimeUnit.MILLISECONDS).cancel(true);
+//                } catch (Exception e) {
+//                    // TODO: handle exception
+//                }
+                boolean cancelled = channelFuture.cancel(true);
+                System.out.println("Did we cancel? " + cancelled);
+                if (!cancelled) {
+                    try {
+                        System.out.println("serverChannel? " + serverChannel);
+                        Thread.sleep(1000);
+                        System.out.println("serverChannel? " + serverChannel);
+                        this.nettyFramework.stop(serverChannel, nettyFramework.getDefaultChainQuiesceTimeout());
+                    } catch (Exception e) {
+                        // TODO: handle exception
+                    }
+                    // wait for server channel and kill the server
+                }
+                channelFuture = null;
             }
+            chainState.set(ChainState.STOPPED.val);
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.entry(tc, "Netty channel not initialized, returning from stop");
             }
+            return;
         } else {
-
-            if (chainState.get() != ChainState.RESTARTING.val) {
-                this.nettyFramework.stop(serverChannel, nettyFramework.getDefaultChainQuiesceTimeout());
-                chainState.set(ChainState.STOPPED.val);
-            }
+            System.out.println("Stopping chain!");
+            this.nettyFramework.stop(serverChannel, nettyFramework.getDefaultChainQuiesceTimeout());
+            chainState.set(ChainState.STOPPED.val);
 
         }
 
@@ -151,6 +170,7 @@ public class NettyChain extends HttpChain {
 
         // Don't update or start the chain if it is disabled or the framework is stopping..
         if (!this.enabled || FrameworkState.isStopping()) {
+            System.out.println("Not enabled, returning");
             return;
         }
 
@@ -198,6 +218,7 @@ public class NettyChain extends HttpChain {
     }
 
     public synchronized void startNettyChannel() {
+        new Exception().printStackTrace();
         startCount = startCount + 1;
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -257,12 +278,13 @@ public class NettyChain extends HttpChain {
                                                                                                                                                                                                                       + isHttps);
                         Tr.debug(this, tc, sb.toString());
                     }
-                    this.endpointMgr.removeEndPoint(endpointName);
-                    VirtualHostMap.notifyStopped(owner, currentConfig.getResolvedHost(), currentConfig.getConfigPort(), isHttps);
-                    currentConfig.clearActivePort();
-                    String topic = owner.getEventTopic() + HttpServiceConstants.ENDPOINT_STOPPED;
-                    postEvent(topic, currentConfig, null);
+//                    this.endpointMgr.removeEndPoint(endpointName);
+//                    VirtualHostMap.notifyStopped(owner, currentConfig.getResolvedHost(), currentConfig.getConfigPort(), isHttps);
+//                    currentConfig.clearActivePort();
+//                    String topic = owner.getEventTopic() + HttpServiceConstants.ENDPOINT_STOPPED;
+//                    postEvent(topic, currentConfig, null);
                 } else {
+                    System.out.println("Created channel properly!");
                     parent.chainState.set(ChainState.STARTED.val);
                     parent.serverChannel = f.channel();
                     VirtualHostMap.notifyStarted(owner, () -> currentConfig.getResolvedHost(), currentConfig.getConfigPort(), isHttps);
@@ -270,8 +292,12 @@ public class NettyChain extends HttpChain {
                     postEvent(topic, currentConfig, null);
                 }
             });
-            if (restarting)
+            if (NettyFrameworkImpl.isServerCompletelyStarted()) {
+                System.out.println("Completely started!");
                 channelFuture.get(nettyFramework.getDefaultChainQuiesceTimeout(), TimeUnit.MILLISECONDS).await();
+            }
+//            if (restarting)
+//            serverChannel = channelFuture.get(nettyFramework.getDefaultChainQuiesceTimeout(), TimeUnit.MILLISECONDS).channel();
         } catch (Exception e) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "Problem in starting the chain " + e);
