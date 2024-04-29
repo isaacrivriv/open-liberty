@@ -31,6 +31,9 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.zip.DataFormatException;
 
@@ -62,6 +65,7 @@ import com.ibm.ws.http.netty.inbound.NettyTCPWriteRequestContext;
 import com.ibm.ws.http.netty.message.NettyResponseMessage;
 import com.ibm.ws.http.netty.pipeline.ResponseCompressionHandler;
 import com.ibm.ws.http.netty.pipeline.inbound.HttpDispatcherHandler;
+import com.ibm.ws.http.netty.pipeline.outbound.HeaderHandler;
 import com.ibm.ws.http2.GrpcServletServices;
 import com.ibm.ws.netty.upgrade.NettyServletUpgradeHandler;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
@@ -2260,7 +2264,7 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         synchWrite();
     }
 
-    final protected void sendHeaders(HttpResponse response) {
+    final protected void sendHeaders(HttpResponse response) throws IOException {
         if (headersSent()) {
             Tr.event(tc, "Invalid call to sendHeaders after already sent");
             return;
@@ -2268,34 +2272,34 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
         if (getResponse() instanceof NettyResponseMessage) {
 
-            // TODO Check this as I believe it's not needed any longer
+            ((NettyResponseMessage) getResponse()).processCookies();
+            HeaderHandler headerHandler = new HeaderHandler(myChannelConfig, response);
+            headerHandler.complianceCheck();
+            
+//            if(getResponse().getStatusCode().getIntCode() == 302) {
+//                getResponse().setContentLength(0);
+//            }
+
+           
             if (HttpUtil.isContentLengthSet(response)) {
                 this.nettyContext.channel().attr(NettyHttpConstants.CONTENT_LENGTH).set(HttpUtil.getContentLength(response));
             }
-
-            ((NettyResponseMessage) getResponse()).processCookies();
+            
         }
-
-        MSP.log("should write netty response");
         final boolean isSwitching = response.status().equals(HttpResponseStatus.SWITCHING_PROTOCOLS);
 
         if (isSwitching && "websocket".equalsIgnoreCase(response.headers().get(HttpHeaderNames.UPGRADE))) {
             nettyContext.channel().attr(NettyHttpConstants.PROTOCOL).set("WebSocket");
         }
-
-        System.out.println("Is content length set?: " + HttpUtil.isContentLengthSet(nettyResponse));
-        System.out.println("Is transfer encoding set?: " + HttpUtil.isTransferEncodingChunked(nettyResponse));
-
         this.nettyContext.channel().writeAndFlush(this.nettyResponse);
+        
         this.setHeadersSent();
+
 
         try {
         } catch (Exception e) {
         }
 
-        //setupCompressionHandler();
-
-        // this.setHeadersSent();
     }
 
     /**
@@ -2983,6 +2987,7 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
         if (this.nettyContext.channel().pipeline().get(NettyServletUpgradeHandler.class) != null) {
             System.out.println("Skipping HTTP content because upgrade was triggered!");
+
         }
         boolean shouldSkipWriteOnUpgrade = nettyResponse.status().equals(HttpResponseStatus.SWITCHING_PROTOCOLS)
                                            && !nettyContext.channel().attr(NettyHttpConstants.PROTOCOL).get().equals("HTTP2");

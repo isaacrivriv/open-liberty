@@ -505,6 +505,7 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
         this.bIsCommitted = true;
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "Committed flag set on " + this);
+
         }
     }
 
@@ -591,6 +592,7 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
      *
      * @return HttpServiceContextImpl
      */
+    @Override
     public HttpServiceContextImpl getServiceContext() {
         return this.myHSC;
     }
@@ -2966,6 +2968,7 @@ public abstract class HttpBaseMessageImpl extends GenericMessageImpl implements 
      *
      * @return long
      */
+    @Override
     public long getStartTime() {
         return this.startTime;
     }

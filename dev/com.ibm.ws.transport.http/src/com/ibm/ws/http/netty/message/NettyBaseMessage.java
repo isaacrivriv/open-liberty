@@ -665,12 +665,17 @@ public class NettyBaseMessage implements HttpBaseMessage {
 
     @Override
     public boolean isCommitted() {
+
         return this.committed;
     }
 
     @Override
     public void setCommitted() {
         this.committed = Boolean.TRUE;
+    }
+
+    public void setCommitted(boolean committed) {
+        this.committed = committed;
     }
 
     @Override
