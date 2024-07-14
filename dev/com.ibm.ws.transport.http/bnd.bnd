@@ -48,6 +48,7 @@ Export-Package: \
 
 Import-Package: \
     !com.ibm.ws.http.logging.source, \
+    io.openliberty.netty.internal*,\
     ${defaultPackageImport}
 
 Private-Package: \
@@ -140,6 +141,8 @@ instrument.classesExcludes: \
 	com.ibm.ws.runtime.update,\
 	com.ibm.ws.threading,\
 	com.ibm.ws.org.osgi.annotation.versioning;version=latest,\
+    io.openliberty.netty.internal;version=latest,\
+	io.openliberty.netty.internal.impl;version=latest,\
 	io.openliberty.accesslists.internal
 
 -testpath: \

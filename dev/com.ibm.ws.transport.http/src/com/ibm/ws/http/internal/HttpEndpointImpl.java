@@ -69,6 +69,9 @@ import com.ibm.wsspi.kernel.service.utils.OnErrorUtil.OnError;
 
 import io.openliberty.checkpoint.spi.CheckpointHook;
 import io.openliberty.checkpoint.spi.CheckpointPhase;
+import io.openliberty.netty.internal.NettyFramework;
+import io.openliberty.netty.internal.tls.NettyTlsProvider;
+
 
 @Component(configurationPid = "com.ibm.ws.http",
            configurationPolicy = ConfigurationPolicy.REQUIRE,
@@ -103,6 +106,11 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
 
     /** Required, static Channel framework reference */
     private CHFWBundle chfw = null;
+
+    /** Required, static Netty framework reference */
+    private NettyFramework netty = null;
+
+    private NettyTlsProvider nettyTlsProvider = null;
 
     /** Required, dynamic tcpOptions: unmodifiable map */
     private volatile ChannelConfiguration tcpOptions = null;
@@ -178,6 +186,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
             Runnable r;
             for (;;) {
                 synchronized (actionQueue) {
+                    System.out.println("Action queue running");
                     r = actionQueue.poll();
                     if (r == null) {
                         actionFuture = null;
@@ -195,6 +204,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         @Trivial
         public void run() {
             synchronized (actionLock) {
+                System.out.println("Stop action running");
                 // Always allow stops.
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                     Tr.debug(this, tc, "EndpointAction: stopping chains " + HttpEndpointImpl.this, httpChain, httpSecureChain);
@@ -210,6 +220,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         @Trivial
         public void run() {
             synchronized (actionLock) {
+                System.out.println("Stop https action running");
                 // Always allow stops.
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                     Tr.debug(this, tc, "EndpointAction: stopping https chain " + HttpEndpointImpl.this, httpSecureChain);
@@ -224,11 +235,12 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         @Trivial
         public void run() {
             synchronized (actionLock) {
+                System.out.println("Update action running: "+endpointStarted + ", "+endpointState.get());
                 // only try to update the chains if the endpoint is enabled/started and framework is good
                 if (endpointStarted && endpointState.get() == ENABLED && FrameworkState.isValid()) {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled())
                         Tr.debug(this, tc, "EndpointAction: updating chains " + HttpEndpointImpl.this, httpChain, httpSecureChain);
-
+                    System.out.println("Update action updating chains");
                     String resolvedHost = resolvedHostName;
                     httpChain.update(resolvedHost);
                     httpSecureChain.update(resolvedHost);
@@ -242,6 +254,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         cid = config.get(ComponentConstants.COMPONENT_ID);
         name = (String) config.get("id");
         pid = (String) config.get(Constants.SERVICE_PID);
+        System.out.println("Activate called!" + this);
 
         bundleContext = ctx.getBundleContext();
 
@@ -859,6 +872,33 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         return chfw;
     }
 
+    @Reference(name = "nettyBundle")
+    protected void setNettyBundle(NettyFramework bundle) {
+        netty = bundle;
+    }
+
+    protected void unsetNettyBundle(NettyFramework bundle) {
+
+    }
+
+    protected NettyFramework getNettyBundle() {
+        return netty;
+    }
+
+    @Reference(name = "nettyTlsProvider", cardinality = ReferenceCardinality.OPTIONAL, policyOption = ReferencePolicyOption.GREEDY, unbind = "unbindTlsProviderService")
+    protected void bindNettyTlsProvider(NettyTlsProvider tlsProvider) {
+        System.out.println("Setting Netty TLS provider");
+        this.nettyTlsProvider = tlsProvider;
+    }
+
+    protected void unbindTlsProviderService(NettyTlsProvider bundle) {
+        this.nettyTlsProvider = null;
+    }
+
+    public NettyTlsProvider getNettyTlsProvider() {
+        return this.nettyTlsProvider;
+    }
+
     /**
      * DS method for setting the required dynamic executor service reference.
      *
@@ -938,9 +978,12 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
      */
     @Trivial
     private void performAction(Runnable action, boolean addToQueue) {
+        System.out.println("Performing action: "+this);
+        new Exception().printStackTrace();
         ExecutorService exec = executorService.getService();
 
         if (exec == null) {
+            System.out.println("Executor service null, running action in place");
             // If we can't find the executor service, we have to run it in place.
             action.run();
         } else {
@@ -960,13 +1003,16 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
             // random order.
             if (addToQueue) {
                 synchronized (actionQueue) {
+                    System.out.println("Adding action to action queue");
                     actionQueue.add(action);
                     if ((actionFuture == null) && (configFuture == null)) {
+                        System.out.println("Running action in executor service");
                         actionFuture = exec.submit(actionsRunner);
                     }
                 }
             } else {
                 // Schedule immediately
+                System.out.println("AddToQueue false, running action in executor service");
                 exec.submit(action);
             }
         }
