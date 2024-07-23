@@ -9,6 +9,7 @@
  *******************************************************************************/
 package com.ibm.ws.http.netty.pipeline.inbound;
 
+import java.nio.channels.ClosedChannelException;
 import java.util.Objects;
 
 import com.ibm.ws.http.channel.internal.HttpChannelConfig;
@@ -105,7 +106,9 @@ public class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpR
             Http2Connection connection = handler.connection();
             connection.stream(c.streamId()).close();
             return;
-        }
+        } else if (cause instanceof ClosedChannelException && !context.channel().isActive()) {
+            System.out.println("Exception caught error occurred, the channel was found closed. Closing the context...");
+     }
         context.close();
     }
 
