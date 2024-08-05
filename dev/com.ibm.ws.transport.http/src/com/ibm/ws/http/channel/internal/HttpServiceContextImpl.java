@@ -2313,7 +2313,7 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         if (isSwitching && "websocket".equalsIgnoreCase(response.headers().get(HttpHeaderNames.UPGRADE))) {
             nettyContext.channel().attr(NettyHttpConstants.PROTOCOL).set("WebSocket");
         }
-        this.nettyContext.channel().writeAndFlush(response);
+        this.nettyContext.channel().write(response);
         
         MSP.log("After flush Headers: ");
         response.headers().forEach(header -> MSP.log(header.getKey() + ": " + header.getValue()));

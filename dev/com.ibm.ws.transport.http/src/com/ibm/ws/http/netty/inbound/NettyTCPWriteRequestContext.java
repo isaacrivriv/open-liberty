@@ -222,17 +222,8 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
         final AtomicReference<Throwable> writeFailure = new AtomicReference<>(null);
 
-        if (!nettyChannel.isActive()) {
-            System.out.println("Error occurred before writing to output, the channel was found closed. No need to throw an exception here. Continuing as normal...");
-            return writtenBytes.get();
-        }
-
         try {
             for (WsByteBuffer buffer : buffers) {
-                if (!nettyChannel.isActive()) {
-                    System.out.println("Error occurred while writing to output, the channel was found closed. No need to throw an exception here. Continuing as normal...");
-                    return writtenBytes.get();
-                }
                 if (buffer != null && buffer.remaining() != 0) {
 
                     if (isH2) {
@@ -257,11 +248,6 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                         writtenBytes.addAndGet(chunkedInput.length());
                     }
                 }
-            }
-
-            if (!nettyChannel.isActive()) {
-                System.out.println("Error occurred after writing to output, the channel was found closed. No need to throw an exception here. Continuing as normal...");
-                return writtenBytes.get();
             }
 
             // Flush all pending writes
@@ -290,11 +276,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
             }
 
             if (writeFailure.get() != null) {
-                if (writeFailure.get() instanceof ClosedChannelException && !nettyChannel.isActive()) {
-                    System.out.println("Error occurred while waiting to write to output, the channel was found closed. No need to throw an exception here. Continuing as normal..."
-                                       + writeFailure.get());
-                } else
-                    throw new IOException("Write operation failed", writeFailure.get());
+                throw new IOException("Write operation failed", writeFailure.get());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
