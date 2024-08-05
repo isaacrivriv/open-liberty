@@ -437,6 +437,8 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
      * @param isPause        True if this call is being made for pause endpoint processing.
      */
     public void processHttpChainWork(boolean enableEndpoint, boolean isPause) {
+        System.out.println("Http Chain work called");
+        new Exception().printStackTrace();
         if (enableEndpoint) {
             // enable the endpoint if it is currently disabled
             // it's ok if the endpoint is stopped, the config update will occur @ next start

@@ -82,7 +82,7 @@ public class NettyChain extends HttpChain {
         dispatcherName = "HTTPD-" + root;
         chainName = "CHAIN-" + root;
 
-        MSP.log("NettyChain initialized: Endpoint ID = " + endpointId + ", Endpint Name = " + root);
+        System.out.println("NettyChain initialized: Endpoint ID = " + endpointId + ", Endpint Name = " + root);
 
         state.set(ChainState.STOPPED);
 
@@ -93,7 +93,7 @@ public class NettyChain extends HttpChain {
     @Override
     public synchronized void stop() {
         stopCount++;
-        MSP.log("Attempting to stop NettyChain: " + endpointName + " Attempt count: " + stopCount + " Current state: " + state.get());
+        System.out.println("Attempting to stop NettyChain: " + endpointName + " Attempt count: " + stopCount + " Current state: " + state.get());
 
         if (state.get() != ChainState.STOPPING) {
             endpointMgr.removeEndPoint(endpointName);
@@ -102,7 +102,7 @@ public class NettyChain extends HttpChain {
             try {
                 if (Objects.nonNull(serverChannel) && serverChannel.isOpen()) {
 
-                    MSP.log("STOP -> serverChannel is open, attempting to close");
+                    System.out.println("STOP -> serverChannel is open, attempting to close");
 
                     nettyFramework.stop(serverChannel, -1);
                     // TODO Check this syncUninterruptibly
@@ -113,7 +113,7 @@ public class NettyChain extends HttpChain {
             } finally {
                 if (previousState.val > ChainState.QUIESCED.val) {
                     VirtualHostMap.notifyStopped(owner, currentConfig.getResolvedHost(), currentConfig.getConfigPort(), isHttps);
-                    MSP.log("stop()-> VHOST notified");
+                    System.out.println("stop()-> VHOST notified");
                     currentConfig.clearActivePort();
                     String topic = owner.getEventTopic() + HttpServiceConstants.ENDPOINT_STOPPED;
                     postEvent(topic, currentConfig, null);
@@ -122,7 +122,7 @@ public class NettyChain extends HttpChain {
                 notifyAll();
             }
         } else {
-            MSP.log("NETTY CHAIN ERROR (STOP) - NettyChain is not in a stoppable state. Current state: " + state.get());
+            System.out.println("NETTY CHAIN ERROR (STOP) - NettyChain is not in a stoppable state. Current state: " + state.get());
         }
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -131,11 +131,15 @@ public class NettyChain extends HttpChain {
     }
 
     private void stopAndWait() {
+        System.out.println("Stop and wait entry...");
         if (state.get() != ChainState.STOPPED) {
+            System.out.println("Calling stop...");
             stop();
             while (state.get() != ChainState.STOPPED) {
                 try {
+                    System.out.println("Waiting until stop...");
                     wait();
+                    System.out.println("Stopped waiting...");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -148,14 +152,14 @@ public class NettyChain extends HttpChain {
 
         updateCount++;
 
-        MSP.log("Updating NettyChain: " + endpointName + " Update count: " + updateCount + " Current state: " + state.get());
+        System.out.println("Updating NettyChain: " + endpointName + " Update count: " + updateCount + " Current state: " + state.get());
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.entry(this, tc, "update chain " + this);
         }
 
         if (!enabled || FrameworkState.isStopping()) {
-            MSP.log("Chain is disabled or framework is stopping, skipping update.");
+            System.out.println("Chain is disabled or framework is stopping, skipping update.");
             return;
         }
 
@@ -171,49 +175,51 @@ public class NettyChain extends HttpChain {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "Stopping chain due to configuration " + newConfig);
             }
-            MSP.log("Stopping chain due to configuration " + newConfig);
+            System.out.println("Stopping chain due to configuration " + newConfig);
             // save the new/changed configuration before we start setting up the new chain
             currentConfig = newConfig;
             stopAndWait();
         }
 
         if (!newConfig.unchanged(oldConfig)) {
-            MSP.log("This configuration differs and should cause an update");
+            System.out.println("This configuration differs and should cause an update");
             currentConfig = newConfig;
             stopAndWait();
             startNettyChannel();
-            MSP.log("Channel restarted with new configuration.");
+            System.out.println("Channel restarted with new configuration.");
         }
     }
 
     public synchronized void startNettyChannel() {
 
         startCount++;
-        MSP.log("Starting NettyChannel: " + endpointName + " Attempt count: " + startCount);
+        System.out.println("Starting NettyChannel: " + endpointName + " Attempt count: " + startCount);
 
         if (state.get() != ChainState.STOPPED) {
-            MSP.log("NettyChain is not in STOPPED state. Current state: " + state.get());
+            System.out.println("NettyChain is not in STOPPED state. Current state: " + state.get());
 
             stopAndWait();
 
         }
 
         // Don't update or start the chain if it is disabled or the framework is stopping..
-        if (!enabled || FrameworkState.isStopping())
+        if (!enabled || FrameworkState.isStopping()) {
+            System.out.println("Not enabled or framework stopping");
             return;
+        }
 
         if (state.compareAndSet(ChainState.STOPPED, ChainState.STARTING)) {
 
             try {
 
-                MSP.log("State should ALWAYS be STARTING here: " + state.get());
+                System.out.println("State should ALWAYS be STARTING here: " + state.get());
 
                 Map<String, Object> httpOptions = new HashMap<String, Object>();
                 owner.getHttpOptions().forEach(httpOptions::putIfAbsent);
                 // Put the endpoint id, which allows us to find the registered access log
                 // dynamically
                 httpOptions.put(HttpConfigConstants.PROPNAME_ACCESSLOG_ID, owner.getName());
-                httpOptions.keySet().forEach(MSP::log);
+                httpOptions.keySet().forEach(System.out::println);
                 // Put the protocol version, which allows the http channel to dynamically
                 // know what http version it will use.
                 if (owner.getProtocolVersion() != null) {
@@ -224,7 +230,7 @@ public class NettyChain extends HttpChain {
                 info = endpointMgr.defineEndPoint(this.endpointName, currentConfig.configHost, currentConfig.configPort);
 
                 Map<String, Object> tcpOptions = new HashMap<String, Object>();
-                MSP.log("Put " + ConfigConstants.EXTERNAL_NAME + " with value: " + endpointName);
+                System.out.println("Put " + ConfigConstants.EXTERNAL_NAME + " with value: " + endpointName);
 
                 this.getOwner().getTcpOptions().forEach(tcpOptions::putIfAbsent);
                 tcpOptions.put(ConfigConstants.EXTERNAL_NAME, endpointName);
@@ -248,7 +254,7 @@ public class NettyChain extends HttpChain {
                 
 
             } catch (Exception e) {
-                MSP.log("Failed to start NettyChannel: " + e.getMessage());
+                System.out.println("Failed to start NettyChannel: " + e.getMessage());
                 state.set(ChainState.STOPPED);
             } finally {
                 notifyAll();
@@ -266,10 +272,10 @@ public class NettyChain extends HttpChain {
             // String topic = owner.getEventTopic() + HttpServiceConstants.ENDPOINT_STARTED;
             // postEvent(topic, currentConfig, null);
 
-            MSP.log("Channel is now active and listening on port " + getActivePort());
+            System.out.println("Channel is now active and listening on port " + getActivePort());
 
         } else {
-            MSP.log("ChannelFutureHandler -> Failed to bind to port: " + future.cause());
+            System.out.println("ChannelFutureHandler -> Failed to bind to port: " + future.cause());
             stopAndWait();
         }
     }
