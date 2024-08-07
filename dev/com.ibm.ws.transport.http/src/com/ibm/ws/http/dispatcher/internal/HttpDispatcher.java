@@ -768,6 +768,8 @@ public class HttpDispatcher {
         behaviorRef = reference;
         useEE7Streams = (Boolean) reference.getProperty(HttpTransportBehavior.USE_EE7_STREAMS);
         useIOExceptionBehavior = (Boolean) reference.getProperty(HttpTransportBehavior.USE_IOE_BEHAVIOR);
+        // TODO to test response already commited behavior
+        useIOExceptionBehavior = false;
     }
 
     protected synchronized void unsetBehavior(ServiceReference<HttpTransportBehavior> reference) {

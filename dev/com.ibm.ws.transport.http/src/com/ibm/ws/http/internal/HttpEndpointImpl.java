@@ -569,6 +569,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         if (endpointConfig != null && nettyTlsProvider != null) {
             httpSecureChain.enable();
             // If this is post-activate, drive the update action
+            System.out.println("Setting ssl support");
             performAction(updateAction);
         }
     }
@@ -608,6 +609,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
         this.sslOptions.setReference(service);
         if (endpointConfig != null) {
+            System.out.println("Setting ssl options");
             performAction(updateAction);
         }
     }
@@ -618,6 +620,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
             Tr.event(this, tc, "update ssl options " + service.getProperty("id"), this);
         }
         if (endpointConfig != null) {
+            System.out.println("Updated ssl options");
             performAction(updateAction);
         }
     }
@@ -654,6 +657,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
         this.tcpOptions = config;
         if (endpointConfig != null) {
+            System.out.println("Setting tcp options");
             performAction(updateAction);
         }
     }
@@ -664,6 +668,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
             Tr.event(this, tc, "update tcp options " + config.getProperty("id"), this);
         }
         if (endpointConfig != null) {
+            System.out.println("Updated tcp options");
             performAction(updateAction);
         }
     }
@@ -693,6 +698,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
         this.httpOptions = config;
         if (endpointConfig != null) {
+            System.out.println("Setting http options");
             performAction(updateAction);
         }
     }
@@ -703,6 +709,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
             Tr.event(this, tc, "update http options " + config.getProperty("id"), this);
         }
         if (endpointConfig != null) {
+            System.out.println("Updated http options");
             performAction(updateAction);
         }
     }
@@ -733,6 +740,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
         this.compressionConfig = config;
         if (compressionConfig != null) {
+            System.out.println("Setting compression");
             performAction(updateAction);
         }
     }
@@ -744,6 +752,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
 
         if (compressionConfig != null) {
+            System.out.println("Updated compression");
             performAction(updateAction);
         }
     }
@@ -774,6 +783,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         MSP.log("Remote IP config set called");
         this.remoteIpConfig = config;
         if (remoteIpConfig != null) {
+            System.out.println("Setting remote ip");
             performAction(updateAction);
         }
     }
@@ -784,6 +794,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
             Tr.event(this, tc, "update remote ip " + config.getProperty("id"), this);
         }
         if (remoteIpConfig != null) {
+            System.out.println("Updated remote ip");
             performAction(updateAction);
         }
     }
@@ -814,6 +825,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
         this.samesiteConfig = config;
         if (samesiteConfig != null) {
+            System.out.println("Setting samesite");
             performAction(updateAction);
         }
     }
@@ -825,6 +837,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
 
         if (samesiteConfig != null) {
+            System.out.println("Updated samesite");
             performAction(updateAction);
         }
     }
@@ -855,6 +868,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
         this.headersConfig = config;
         if (headersConfig != null) {
+            System.out.println("Setting headers");
             performAction(updateAction);
         }
     }
@@ -866,6 +880,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         }
 
         if (headersConfig != null) {
+            System.out.println("Updated headers");
             performAction(updateAction);
         }
     }
@@ -918,6 +933,7 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
     protected void bindNettyTlsProvider(NettyTlsProvider tlsProvider) {
         this.nettyTlsProvider = tlsProvider;
         if (endpointConfig != null && sslFactoryProvider.getReference() != null) {
+            System.out.println("Binding netty tls provider");
             httpSecureChain.enable();
             // If this is post-activate, drive the update action
             performAction(updateAction);

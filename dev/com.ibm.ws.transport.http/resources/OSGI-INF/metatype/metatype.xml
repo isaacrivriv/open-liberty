@@ -206,7 +206,8 @@
             id="incomingBodyBufferSize" required="false" type="Integer" min="1024" max="1048576" default="32768" />
             
         <AD name="%http.throwIOEForInboundConnections" description="%http.throwIOEForInboundConnections.desc"
-            id="ThrowIOEForInboundConnections" required="false" type="Boolean"/> 
+            id="ThrowIOEForInboundConnections" required="false" type="Boolean" default="false"/>
+            <!-- Temporary change to default false to verify issue when writing out on a closed channel -->
             
         <AD name="%http.decompressionRatioLimit" description="%http.decompressionRatioLimit.desc"
             id="decompressionRatioLimit" required="false" type="Integer" min="1" default="200" />
