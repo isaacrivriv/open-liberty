@@ -19,7 +19,9 @@ import io.netty.channel.socket.ChannelInputShutdownEvent;
 import io.netty.handler.codec.http.FullHttpRequest;
 
 /**
- *
+ * Handler that works on queueing requests as they come through the aggregator for proper HTTP pipelining support
+ * and also handles the behavior of closing a connection after we finish processing HTTP 1.1 requests if the remote
+ * peer already closed the connection.
  */
 public class LibertyHttpRequestHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
@@ -45,7 +47,6 @@ public class LibertyHttpRequestHandler extends SimpleChannelInboundHandler<FullH
         System.out.println("Reading Full HTTP Request for channel: " + context.channel());
         if (request.decoderResult().isFinished() && request.decoderResult().isSuccess()) {
             System.out.println("Success handling request, verifying if it needs to be queued");
-//            FullHttpRequest msg = ReferenceCountUtil.retain(request, 1);
             synchronized (context.channel().attr(NettyHttpConstants.HANDLING_REQUEST)) {
                 if (context.channel().attr(NettyHttpConstants.HANDLING_REQUEST).get()) {
                     System.out.println("Request in progress, queueing next request");
