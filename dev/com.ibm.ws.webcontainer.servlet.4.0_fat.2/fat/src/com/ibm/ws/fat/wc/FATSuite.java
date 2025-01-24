@@ -15,6 +15,7 @@ import org.junit.runners.Suite;
 import org.junit.runners.Suite.SuiteClasses;
 
 import com.ibm.ws.fat.util.FatLogHandler;
+import com.ibm.ws.fat.wc.tests.NettyTests;
 import com.ibm.ws.fat.wc.tests.WCPartitionedAttributeTests;
 import com.ibm.ws.fat.wc.tests.WCPartitionedCookieAttributeSecurityTest;
 import com.ibm.ws.fat.wc.tests.WCRequestAutoDecompressTest;
@@ -50,17 +51,17 @@ import com.ibm.ws.fat.wc.tests.NettyTests;
  */
 @RunWith(Suite.class)
 @SuiteClasses({
-                //WCRequestAutoDecompressTest.class,
-                //WCResponseContentLengthChunkedEncodingTest.class,
-                //WCResponseHeadersTest.class,
-                //WCSameSiteCookieAttributeTests.class,
-                //WCSameSiteCookieAttributeSecurityTest.class,
-                //WCPartitionedAttributeTests.class,
-                //WCPartitionedCookieAttributeSecurityTest.class,
-                //WCSameSiteIncompatibleClientsTests.class,
-                //WebAndWebFragmentServletMappingTests.class,
-                //WebSphereServletEventListenerTest.class,
-                //WebSphereSpiHttpRequestURLTest.class,
+                WCRequestAutoDecompressTest.class,
+                WCResponseContentLengthChunkedEncodingTest.class,
+                WCResponseHeadersTest.class,
+                WCSameSiteCookieAttributeTests.class,
+                WCSameSiteCookieAttributeSecurityTest.class,
+                WCPartitionedAttributeTests.class,
+                WCPartitionedCookieAttributeSecurityTest.class,
+                WCSameSiteIncompatibleClientsTests.class,
+                WebAndWebFragmentServletMappingTests.class,
+                WebSphereServletEventListenerTest.class,
+                WebSphereSpiHttpRequestURLTest.class,
                 NettyTests.class
 })
 
