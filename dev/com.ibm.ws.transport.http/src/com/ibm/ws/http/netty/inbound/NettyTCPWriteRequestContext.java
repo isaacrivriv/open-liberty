@@ -19,6 +19,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.ibm.websphere.ras.Tr;
+import com.ibm.websphere.ras.TraceComponent;
+import com.ibm.ws.http.channel.internal.HttpMessages;
 import com.ibm.ws.http.dispatcher.internal.HttpDispatcher;
 import com.ibm.ws.http.netty.NettyHttpConstants;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
@@ -40,6 +43,8 @@ import io.openliberty.http.netty.stream.WsByteBufferChunkedInput;
  *
  */
 public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
+
+    private static final TraceComponent tc = Tr.register(NettyTCPWriteRequestContext.class, HttpMessages.HTTP_TRACE_NAME, HttpMessages.HTTP_BUNDLE);
 
     private final NettyTCPConnectionContext connectionContext;
     private final Channel nettyChannel;
@@ -202,6 +207,9 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
         final boolean isH2 = "HTTP2".equals(protocol);
         if (!nettyChannel.isWritable()) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Channel was found not writeable in sync write! " + nettyChannel);
+            }
             return writtenBytes.get();
         }
 
@@ -221,6 +229,9 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                     }
 
                     else if (hasContentLength || isWsoc || isHttp10) {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Writing sync on channel: " + nettyChannel + " which is wsoc? " + isWsoc);
+                        }
                         ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                         this.nettyChannel.write(nettyBuf); // Write data to the channel
                         writtenBytes.addAndGet(nettyBuf.readableBytes());
@@ -256,14 +267,26 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                 return 0; // Return immediately
             } else if (timeout != NO_TIMEOUT) { // Check if a timeout value is specified
                 if (!latch.await(timeout, TimeUnit.MILLISECONDS)) {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "Write timeout hit on sync write for channel: " + nettyChannel);
+                    }
                     throw new IOException("Write operation timed out");
                 }
             }
 
             if (writeFailure.get() != null) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Write failed on sync write for channel: " + nettyChannel);
+                    Tr.debug(this, tc, "Failure hit: " + writeFailure.get());
+                    writeFailure.get().printStackTrace();
+                }
                 throw new IOException("Write operation failed", writeFailure.get());
             }
         } catch (InterruptedException e) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Thread was interrupted while waiting for write to complete: " + nettyChannel);
+                e.printStackTrace();
+            }
             Thread.currentThread().interrupt();
             throw new IOException("Thread was interrupted while waiting for write to complete", e);
         }
@@ -287,6 +310,10 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         final boolean isH2 = "HTTP2".equals(protocol);
 
         if (Objects.isNull(buffers)) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Ignoring write, null buffers passed for channel: " + nettyChannel);
+            }
+            // TODO If there is nothing to write, should this be null or vc?
             return null;
         }
 
@@ -299,11 +326,14 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                         if (isH2) {
                             totalWrittenBytes += buffer.remaining();
                             AbstractMap.SimpleEntry<Integer, WsByteBuffer> entry = new AbstractMap.SimpleEntry<Integer, WsByteBuffer>(Integer.valueOf(this.streamID), HttpDispatcher.getBufferManager().wrap(WsByteBufferUtils.asByteArray(buffer)));
-                            this.nettyChannel.writeAndFlush(entry);
+                            lastWriteFuture = this.nettyChannel.writeAndFlush(entry);
 
                         }
 
                         else if (hasContentLength || isWsoc || isHttp10) {
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                Tr.debug(this, tc, "Writing sync on channel: " + nettyChannel + " which is wsoc? " + isWsoc);
+                            }
                             ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                             lastWriteFuture = this.nettyChannel.writeAndFlush(nettyBuf); // Write data to the channel
                             totalWrittenBytes += nettyBuf.readableBytes();
@@ -326,6 +356,27 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
             //nettyChannel.flush();
 
             if (lastWriteFuture == null && wasWritable && stillWritable && totalWrittenBytes >= numBytes) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Found lastWriteFuture to be null or unable to keep writing on channel: " + nettyChannel);
+                    Tr.debug(this, tc, "lastWriteFuture: " + lastWriteFuture + " wasWritable: " + wasWritable + " stillWritable: " + stillWritable + " totalWrittenBytes: "
+                                       + totalWrittenBytes + " numBytes: " + numBytes);
+                }
+                // Every thing was written here. Do callback in another thread
+                if (forceQueue) {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "Forcing callback on channel: " + nettyChannel);
+                    }
+                    HttpDispatcher.getExecutorService().submit(() -> {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Calling callback in asynchronous thread for channel: " + nettyChannel);
+                        }
+                        callback.complete(vc, this);
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Finished callback in asynchronous thread for channel: " + nettyChannel);
+                        }
+                    });
+                    return null;
+                }
                 return vc;
 
             } else {
@@ -333,19 +384,49 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                 if (lastWriteFuture != null) {
                     // We don't have to do the callback if everything wrote properly
                     if (lastWriteFuture.isDone()) {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Found lastWriteFuture to be finished on channel: " + nettyChannel);
+                        }
+                        // Everything was written, if forceQueue need to do callback on another thread
+                        if (forceQueue) {
+                            HttpDispatcher.getExecutorService().submit(() -> {
+                                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                    Tr.debug(this, tc, "Calling callback in asynchronous thread for channel: " + nettyChannel);
+                                }
+                                callback.complete(vc, this);
+                                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                    Tr.debug(this, tc, "Finished callback in asynchronous thread for channel: " + nettyChannel);
+                                }
+                            });
+                            return null;
+                        }
                         return vc;
                     }
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "Went async, found lastWriteFuture to be running on channel: " + nettyChannel);
+                    }
                     lastWriteFuture.addListener((ChannelFutureListener) future -> {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Listener called with success? " + future.isSuccess()+" for channel: " + nettyChannel);
+                        }
                         if (future.isSuccess()) {
                             callback.complete(vc, this);
                         } else {
                             callback.error(vc, this, new IOException(future.cause()));
                         }
                     });
+                } else {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "In else block with lastWriteFuture being null for channel: " + nettyChannel);
+                    }
+                    // TODO: Should we send vc here or null?
                 }
             }
 
         } catch (Exception e) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Caught exception on channel: " + nettyChannel + " , " + e);
+            }
             callback.error(vc, null, new IOException(e));
         }
         return null; // Return null as the write operation is queued or forced to queue
