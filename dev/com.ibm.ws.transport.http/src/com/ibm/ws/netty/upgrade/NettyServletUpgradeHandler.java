@@ -9,14 +9,17 @@
  *******************************************************************************/
 package com.ibm.ws.netty.upgrade;
 
+import java.io.EOFException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
 import com.ibm.ws.ffdc.annotation.FFDCIgnore;
+import com.ibm.ws.http.dispatcher.internal.HttpDispatcher;
 import com.ibm.ws.transport.access.TransportConnectionAccess;
 import com.ibm.ws.transport.access.TransportConstants;
 import com.ibm.wsspi.channelfw.VirtualConnection;
@@ -29,17 +32,17 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.CoalescingBufferQueue;
 import io.netty.channel.VoidChannelPromise;
+import io.netty.channel.socket.ChannelInputShutdownEvent;
 import io.openliberty.netty.internal.impl.QuiesceState;
 
 /**
  *
  */
 public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
-    
+
     private static final TraceComponent tc = Tr.register(NettyServletUpgradeHandler.class);
 
     private final CoalescingBufferQueue queue;
@@ -53,8 +56,11 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     private VirtualConnection vc;
     private TCPReadRequestContext readContext;
     private long minBytesToRead = 0;
-    
+    private AtomicBoolean peerClosedConnection = new AtomicBoolean(false);
+
     private AtomicBoolean immediateTimeout = new AtomicBoolean(false);
+    
+    private AtomicInteger waitingThreads = new AtomicInteger(0);
 
     /**
      * Initialize the queue that will store the data
@@ -66,9 +72,56 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        ctx.channel().closeFuture().addListener(future -> {
-            signalReadReady();
-        });
+        System.out.println("Handler added! " + ctx.channel());
+//        ctx.channel().closeFuture().addListener(future -> {
+//            signalReadReady();
+//        });
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        // java.io.EOFException: Connection closed: Read failed.  Possible end of stream encountered. local=ip:port remote=ip:port
+        if (evt instanceof ChannelInputShutdownEvent) {
+            System.out.println("ChannelInputShutdownEvent kicked off for channel " + channel);
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "NettyServletUpgradeHandler ChannelInputShutdownEvent kicked off for channel " + channel);
+            }
+            peerClosedConnection.getAndSet(true);
+            // If we have data, queue up read signaled
+            if (queuedDataSize() > 0) {
+                System.out.println("ChannelInputShutdownEvent queuedDataSize > 0 for channel " + channel);
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "NettyServletUpgradeHandler userEventTriggered found queued data, signaling read for channel " + channel);
+                }
+                signalReadReady();
+            }
+            // Lock thread and kick off immediate timeout
+            // Do immediate timeout to stop all read threads
+//            readLock.lock();
+//            immediateTimeout();
+//            try {
+//                // Do call back with error to stop wsoc link and destroy the rest
+//                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                    Tr.debug(this, tc, "NettyServletUpgradeHandler userEventTriggered doing error callback for thread on channel " + channel);
+//                }
+//                HttpDispatcher.getExecutorService().execute(() -> {
+//                    try {
+//                        callback.error(vc, readContext, new EOFException("Connection closed: Read failed.  Possible end of stream encountered. local=" + channel.localAddress()
+//                                                                         + " remote=" + channel.remoteAddress()));
+//                    } catch (Exception e) {
+//                        // Log or handle the exception
+//                        System.out.println("Error handling callback on remote closed connection! " + channel);
+//                        e.printStackTrace();
+//                    }
+//                });
+//            } finally {
+//                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                    Tr.debug(this, tc, "NettyServletUpgradeHandler userEventTriggered unlocking readLock for channel " + channel);
+//                }
+////                readLock.unlock();
+//            }
+        }
+        super.userEventTriggered(ctx, evt);
     }
 
     @Override
@@ -105,11 +158,12 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        signalReadReady();
+        System.out.println("Channel inactive: " + ctx.channel());
+//        signalReadReady();
         super.channelInactive(ctx);
 
     }
-    
+
     public void immediateTimeout() {
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(this, tc, "Inside immediate timeout! " + channel);
@@ -117,14 +171,14 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
         immediateTimeout.getAndSet(true);
         signalReadReady();
         // TODO Loop to make sure no others reads are taking place
-        while(readLock.hasQueuedThreads()) { // Queue here until no queued threads are available
+        while (waitingThreads.get() > 0) { // Queue here until no queued threads are available
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "NettyServletUpgradeHandler immediateTimeout waiting to finish immediate timeout on channel: " + channel);
             }
             // TODO If this is kept and not removed when disabling auto read, switch this logic to provide assertion of not running
             // in the event loop and run a repeatable task with ScheduledExecutorService
             try {
-                Thread.sleep(1000);
+                Thread.sleep(500);
             } catch (Exception e) {
                 // TODO: handle exception
             }
@@ -169,8 +223,8 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
             readLock.unlock();
         }
     }
-    
-    public boolean awaitReadReady(long numBytes, int timeout, TimeUnit unit) {
+
+    public boolean awaitReadReady(long numBytes, int timeout, TimeUnit unit) throws EOFException {
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady called for channel " + channel);
         }
@@ -178,6 +232,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady locking readLock for channel " + channel);
         }
+        waitingThreads.incrementAndGet();
         readLock.lock();
         boolean dataReady = false;
         try {
@@ -186,7 +241,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
             } else {
                 long waitTime = timeout == -1 ? Long.MAX_VALUE : unit.toNanos(timeout);
                 long endTime = System.nanoTime() + waitTime;
-                while (!immediateTimeout.get() && totalBytesRead < minBytesToRead && channel.isActive() && !QuiesceState.isQuiesceInProgress()) {
+                while (!peerClosedConnection.get() && !immediateTimeout.get() && totalBytesRead < minBytesToRead && channel.isActive() && !QuiesceState.isQuiesceInProgress()) {
                     if (timeout != -1) { // If timeout is not -1, calculate the remaining wait time
                         waitTime = endTime - System.nanoTime();
                         if (waitTime <= 0)
@@ -197,7 +252,8 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                         waitTime = TimeUnit.SECONDS.toNanos(1);
                         try {
                             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                                Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady waiting " + waitTime + "ns for min bytes to read: " + minBytesToRead + " with total bytes read: " + totalBytesRead + " on channel: " + channel);
+                                Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady waiting " + waitTime + "ns for min bytes to read: " + minBytesToRead
+                                                   + " with total bytes read: " + totalBytesRead + " on channel: " + channel);
                             }
                             readCondition.awaitNanos(waitTime);
                         } catch (InterruptedException e) {
@@ -206,14 +262,16 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                         }
                     } else {
                         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady waiting " + waitTime + " for min bytes to read: " + minBytesToRead + " with total bytes read: " + totalBytesRead + " on channel: " + channel);
+                            Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady waiting " + waitTime + " for min bytes to read: " + minBytesToRead
+                                               + " with total bytes read: " + totalBytesRead + " on channel: " + channel);
                         }
                         readCondition.awaitNanos(waitTime);
                     }
                 }
 
                 dataReady = totalBytesRead >= minBytesToRead; // Check if the minimum number of bytes was read
-                if(immediateTimeout.get()) throw new IllegalStateException("Read interrupted by immediate timeout");
+                if (immediateTimeout.get())
+                    throw new IllegalStateException("Read interrupted by immediate timeout");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt(); // Restore the interrupt status
@@ -221,9 +279,12 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "NettyServletUpgradeHandler awaitReadReady unlocking readLock for channel: " + channel);
             }
+            waitingThreads.decrementAndGet();
             readLock.unlock();
         }
-
+        if(peerClosedConnection.get() && !dataReady) {
+            throw new EOFException("Connection closed: Read failed.  Possible end of stream encountered. local=" + channel.localAddress() + " remote=" + channel.remoteAddress());
+        }
         return dataReady;
     }
 
@@ -259,7 +320,8 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                 // Assume this is async and if we get a runtime exception we can
                 // assume the buffer was already release therefore no need to continue here
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "NettyServletUpgradeHandler setToBuffer hit RuntimeException when adding bytes. We assume the buffer was already released so stop thread run.");
+                    Tr.debug(this, tc,
+                             "NettyServletUpgradeHandler setToBuffer hit RuntimeException when adding bytes. We assume the buffer was already released so stop thread run.");
                 }
                 Thread.currentThread().interrupt();
             } finally {
@@ -324,7 +386,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     public int queuedDataSize() {
         return queue.readableBytes();
     }
-    
+
     public boolean isImmediateTimeout() {
         return immediateTimeout.get();
     }

@@ -9,6 +9,7 @@
  *******************************************************************************/
 package com.ibm.ws.http.netty.inbound;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
@@ -212,6 +213,20 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(this, tc, "Skipping callback logic because read was interrupted! " + nettyChannel);
                 }
+                return;
+            } catch (EOFException e) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "EOFException hit for channel " + nettyChannel);
+                }
+                
+                HttpDispatcher.getExecutorService().execute(() -> {
+                    try {
+                        upgrade.getReadListener().error(vc, this, e);
+                    } catch (Exception e2) {
+                        // Log or handle the exception
+                        e2.printStackTrace();
+                    }
+                });
                 return;
             }
             
