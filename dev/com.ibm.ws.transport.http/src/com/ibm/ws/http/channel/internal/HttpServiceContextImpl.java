@@ -31,6 +31,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.regex.Matcher;
 import java.util.zip.DataFormatException;
 
@@ -3375,11 +3376,11 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         } else {
         }
         ChannelFuture flushFuture = this.nettyContext.channel().writeAndFlush(Unpooled.EMPTY_BUFFER);
+        CountDownLatch writeAndFlushLatch = new CountDownLatch(1);
         flushFuture.addListener(new ChannelFutureListener() {
 
             @Override
-            public void operationComplete(ChannelFuture arg0) throws Exception {
-
+            public void operationComplete(ChannelFuture future) throws Exception {
                 if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
@@ -3387,9 +3388,16 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
                 } else {
                     nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
                 }
+                writeAndFlushLatch.countDown();
             }
         });
-        flushFuture.awaitUninterruptibly();
+        // Sync write data here so need to wait for flush to finish
+        try {
+            writeAndFlushLatch.await();
+        } catch (InterruptedException e) {
+            // TODO should we do something with this exception?
+            e.printStackTrace();
+        }
         setMessageSent();
     }
 
