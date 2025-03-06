@@ -97,6 +97,14 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
     }
 
     @Override
+    public WsByteBuffer getBuffer() {
+        if (this.buffers == null) {
+            return null;
+        }
+        return this.buffers[0];
+    }
+
+    @Override
     public void setBuffers(WsByteBuffer[] bufs) {
 
         if (Objects.isNull(bufs)) {
@@ -149,14 +157,6 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
     }
 
     @Override
-    public WsByteBuffer getBuffer() {
-        if (this.buffers == null) {
-            return null;
-        }
-        return this.buffers[0];
-    }
-
-    @Override
     public void setBuffer(WsByteBuffer buf) {
 
         // reset arrays to free memory quicker. defect 457362
@@ -194,6 +194,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
     @Override
     public long write(long numBytes, int timeout) throws IOException {
+        
         AtomicLong writtenBytes = new AtomicLong(0);
         // Check if "Content-Length" is set for this channel
         boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH) && Objects.nonNull(nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get());
@@ -406,20 +407,22 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                         Tr.debug(this, tc, "Went async, found lastWriteFuture to be running on channel: " + nettyChannel);
                     }
                     lastWriteFuture.addListener((ChannelFutureListener) future -> {
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(this, tc, "Listener called with success? " + future.isSuccess()+" for channel: " + nettyChannel);
-                        }
-                        if (future.isSuccess()) {
-                            callback.complete(vc, this);
-                        } else {
-                            callback.error(vc, this, new IOException(future.cause()));
-                        }
+                        boolean succeeded = future.isSuccess();
+                        HttpDispatcher.getExecutorService().submit(() -> {
+                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                                Tr.debug(this, tc, "Listener called with success? " + succeeded +" for channel: " + nettyChannel);
+                            }
+                            if(succeeded){
+                                callback.complete(vc, this);
+                            } else {
+                                callback.error(vc, this, new IOException(future.cause()));
+                            }
+                        });
                     });
                 } else {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(this, tc, "In else block with lastWriteFuture being null for channel: " + nettyChannel);
                     }
-                    // TODO: Should we send vc here or null?
                 }
             }
 

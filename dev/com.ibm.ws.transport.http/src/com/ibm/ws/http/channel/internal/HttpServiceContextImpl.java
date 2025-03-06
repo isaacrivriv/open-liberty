@@ -3381,14 +3381,16 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
             @Override
             public void operationComplete(ChannelFuture future) throws Exception {
-                if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
+                HttpDispatcher.getExecutorService().submit(()->{
+                    if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
+                        }
+                    } else {
+                        nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
                     }
-                } else {
-                    nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
-                }
-                writeAndFlushLatch.countDown();
+                    writeAndFlushLatch.countDown();
+                });
             }
         });
         // Sync write data here so need to wait for flush to finish
