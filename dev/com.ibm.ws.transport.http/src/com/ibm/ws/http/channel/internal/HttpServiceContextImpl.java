@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.zip.DataFormatException;
 
@@ -3377,28 +3378,28 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         }
         ChannelFuture flushFuture = this.nettyContext.channel().writeAndFlush(Unpooled.EMPTY_BUFFER);
         CountDownLatch writeAndFlushLatch = new CountDownLatch(1);
-        flushFuture.addListener(new ChannelFutureListener() {
+        flushFuture.addListener((ChannelFutureListener) future -> {
+            writeAndFlushLatch.countDown();
 
-            @Override
-            public void operationComplete(ChannelFuture future) throws Exception {
-                HttpDispatcher.getExecutorService().submit(()->{
-                    if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
-                        }
-                    } else {
-                        nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
+            HttpDispatcher.getExecutorService().submit(()->{
+                if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
                     }
-                    writeAndFlushLatch.countDown();
-                });
-            }
+                } else {
+                    nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
+                }        
+            });            
         });
         // Sync write data here so need to wait for flush to finish
         try {
-            writeAndFlushLatch.await();
+            boolean flushedInTime = writeAndFlushLatch.await(getHttpConfig().getWriteTimeout(), TimeUnit.MILLISECONDS);
+            if (!flushedInTime) {
+                throw new IOException("Timed out waiting for write-and-flush to complete.");
+            }
         } catch (InterruptedException e) {
-            // TODO should we do something with this exception?
-            e.printStackTrace();
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for flush to finish", e);
         }
         setMessageSent();
     }
