@@ -195,105 +195,104 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
     @Override
     public long write(long numBytes, int timeout) throws IOException {
         
-        AtomicLong writtenBytes = new AtomicLong(0);
-        // Check if "Content-Length" is set for this channel
-        boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH) && Objects.nonNull(nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get());
-
-        //check if wsoc
-        final String protocol = nettyChannel.attr(NettyHttpConstants.PROTOCOL).get();
-
-        final boolean isHttp10 = "HTTP10".equals(protocol);
-
-        final boolean isWsoc = "WebSocket".equals(protocol);
-
-        final boolean isH2 = "HTTP2".equals(protocol);
-        if (!nettyChannel.isWritable()) {
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                Tr.debug(this, tc, "Channel was found not writeable in sync write! " + nettyChannel);
+        if (nettyChannel.eventLoop().inEventLoop()) {
+            
+            StackTraceElement[] stack = Thread.currentThread().getStackTrace();
+            System.out.println(" MSP -> Current Stack:");
+            for (int i = 2; i < stack.length; i++) {
+                System.out.println(stack[i]);
             }
-            return writtenBytes.get();
+
+            throw new IllegalStateException("Cannot invoke a blocking write on the Netty event loop thread.");
         }
 
-        // Use a CountDownLatch for the flush operation
-        CountDownLatch latch = new CountDownLatch(1);
-
-        final AtomicReference<Throwable> writeFailure = new AtomicReference<>(null);
+        long writtenBytes = 0L;
 
         try {
             for (WsByteBuffer buffer : buffers) {
-                if (buffer != null && buffer.remaining() != 0) {
+                if (buffer == null || buffer.remaining() <= 0) {
+                    continue;
+                }
 
-                    if (isH2) {
-                        writtenBytes.addAndGet(buffer.remaining());
-                        AbstractMap.SimpleEntry<Integer, WsByteBuffer> entry = new AbstractMap.SimpleEntry<Integer, WsByteBuffer>(Integer.valueOf(this.streamID), HttpDispatcher.getBufferManager().wrap(WsByteBufferUtils.asByteArray(buffer)));
-                        this.nettyChannel.write(entry);
+                // If using HTTP2 chunk logic or something else, keep the relevant parts.
+                final String protocol = nettyChannel.attr(NettyHttpConstants.PROTOCOL).get();
+                final boolean isWsoc = "WebSocket".equals(protocol);
+                final boolean isH2 = "HTTP2".equals(protocol);
+                final boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH)
+                                                 && nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get() != null;
+
+                if (isH2) {
+                    
+                    writtenBytes += buffer.remaining();
+                    AbstractMap.SimpleEntry<Integer, WsByteBuffer> entry = new AbstractMap.SimpleEntry<>(Integer.valueOf(this.streamID), HttpDispatcher.getBufferManager().wrap(WsByteBufferUtils.asByteArray(buffer)));
+                    ChannelFuture future = nettyChannel.writeAndFlush(entry);
+                    if (!awaitFuture(future, timeout)) {
+                        throw new IOException("Write operation timed out (HTTP2 chunk).");
+                    }
+                    if (!future.isSuccess()) {
+                        throw new IOException("Write operation failed (HTTP2 chunk).", future.cause());
                     }
 
-                    else if (hasContentLength || isWsoc || isHttp10) {
-                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                            Tr.debug(this, tc, "Writing sync on channel: " + nettyChannel + " which is wsoc? " + isWsoc);
-                        }
-                        ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
-                        this.nettyChannel.write(nettyBuf); // Write data to the channel
-                        writtenBytes.addAndGet(nettyBuf.readableBytes());
-                    }
+                } else if (hasContentLength || isWsoc) {
+                    ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
+                    int bytes = nettyBuf.readableBytes();
+                    ChannelFuture future = nettyChannel.writeAndFlush(nettyBuf);
 
-                    else {
-                        ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
-                        ChannelFuture chunkFuture = nettyChannel.writeAndFlush(chunkedInput);
-                        chunkFuture.awaitUninterruptibly();
-                        writtenBytes.addAndGet(chunkedInput.length());
+                    if (!awaitFuture(future, timeout)) {
+                        throw new IOException("Write operation timed out (hasContentLength/WebSocket).");
                     }
+                    if (!future.isSuccess()) {
+                        throw new IOException("Write operation failed (hasContentLength/WebSocket).", future.cause());
+                    }
+                    writtenBytes += bytes;
+
+                } else {
+                    ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
+                    ChannelFuture future = nettyChannel.writeAndFlush(chunkedInput);
+
+                    if (!awaitFuture(future, timeout)) {
+                        throw new IOException("Write operation timed out (Chunked).");
+                    }
+                    if (!future.isSuccess()) {
+                        throw new IOException("Write operation failed (Chunked).", future.cause());
+                    }
+                    writtenBytes += chunkedInput.length();
                 }
             }
 
-            // Flush all pending writes
-            ChannelFuture flushFuture = this.nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
-
-            // Add listener to the flush operation
-            flushFuture.addListener(future -> {
-                if (!future.isSuccess()) {
-                    writeFailure.set(future.cause());
-                }
-                // Countdown latch once flush operation completes
-                latch.countDown();
-            });
-
-            // Set default timeout to 30 seconds if USE_CHANNEL_TIMEOUT is specified
-            if (timeout == USE_CHANNEL_TIMEOUT) {
-                timeout = 60000; // 30 seconds in milliseconds
+            ChannelFuture flushFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
+            if (!awaitFuture(flushFuture, timeout)) {
+                throw new IOException("Flush operation timed out.");
+            }
+            if (!flushFuture.isSuccess()) {
+                throw new IOException("Flush operation failed.", flushFuture.cause());
             }
 
-            if (timeout == IMMED_TIMEOUT) { // Check for immediate timeout
-                return 0; // Return immediately
-            } else if (timeout != NO_TIMEOUT) { // Check if a timeout value is specified
-                if (!latch.await(timeout, TimeUnit.MILLISECONDS)) {
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(this, tc, "Write timeout hit on sync write for channel: " + nettyChannel);
-                    }
-                    throw new IOException("Write operation timed out");
-                }
-            }
-
-            if (writeFailure.get() != null) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "Write failed on sync write for channel: " + nettyChannel);
-                    Tr.debug(this, tc, "Failure hit: " + writeFailure.get());
-                    writeFailure.get().printStackTrace();
-                }
-                throw new IOException("Write operation failed", writeFailure.get());
-            }
         } catch (InterruptedException e) {
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                Tr.debug(this, tc, "Thread was interrupted while waiting for write to complete: " + nettyChannel);
-                e.printStackTrace();
-            }
+            // Restore interrupt status
             Thread.currentThread().interrupt();
-            throw new IOException("Thread was interrupted while waiting for write to complete", e);
+            throw new IOException("Interrupted while waiting for write to complete.", e);
         }
 
-        return writtenBytes.get(); // Return the total written bytes
+        return writtenBytes;
     }
+
+
+    private boolean awaitFuture(ChannelFuture future, int timeout) throws InterruptedException {
+        if (timeout == USE_CHANNEL_TIMEOUT) {
+            timeout = 60000;
+        }
+
+        if (timeout == IMMED_TIMEOUT) {
+            return future.isDone();
+        } else if (timeout == NO_TIMEOUT) {
+            future.await();
+            return true;
+        } else {
+            return future.await(timeout, TimeUnit.MILLISECONDS);
+        }
+    }
+
 
     @Override
     public VirtualConnection write(long numBytes, TCPWriteCompletedCallback callback, boolean forceQueue, int timeout) {
