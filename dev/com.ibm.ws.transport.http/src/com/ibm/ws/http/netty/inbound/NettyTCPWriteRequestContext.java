@@ -36,6 +36,8 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.handler.codec.http.DefaultHttpContent;
+import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.handler.stream.ChunkedInput;
 import io.openliberty.http.netty.stream.WsByteBufferChunkedInput;
 
@@ -196,7 +198,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
     public long write(long numBytes, int timeout) throws IOException {
         
         if (nettyChannel.eventLoop().inEventLoop()) {
-            
+
             StackTraceElement[] stack = Thread.currentThread().getStackTrace();
             System.out.println(" MSP -> Current Stack:");
             for (int i = 2; i < stack.length; i++) {
@@ -207,6 +209,12 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         }
 
         long writtenBytes = 0L;
+        // If using HTTP2 chunk logic or something else, keep the relevant parts.
+        final String protocol = nettyChannel.attr(NettyHttpConstants.PROTOCOL).get();
+        final boolean isWsoc = "WebSocket".equals(protocol);
+        final boolean isH2 = "HTTP2".equals(protocol);
+        final boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH)
+                                         && nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get() != null;
 
         try {
             for (WsByteBuffer buffer : buffers) {
@@ -214,12 +222,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                     continue;
                 }
 
-                // If using HTTP2 chunk logic or something else, keep the relevant parts.
-                final String protocol = nettyChannel.attr(NettyHttpConstants.PROTOCOL).get();
-                final boolean isWsoc = "WebSocket".equals(protocol);
-                final boolean isH2 = "HTTP2".equals(protocol);
-                final boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH)
-                                                 && nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get() != null;
+                
 
                 if (isH2) {
                     
@@ -247,8 +250,13 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                     writtenBytes += bytes;
 
                 } else {
-                    ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
-                    ChannelFuture future = nettyChannel.writeAndFlush(chunkedInput);
+                   // ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
+                   // ChannelFuture future = nettyChannel.writeAndFlush(chunkedInput);
+
+                    ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
+                    DefaultHttpContent httpContent = new DefaultHttpContent(nettyBuf);
+                
+                    ChannelFuture future = nettyChannel.writeAndFlush(httpContent);
 
                     if (!awaitFuture(future, timeout)) {
                         throw new IOException("Write operation timed out (Chunked).");
@@ -256,9 +264,20 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                     if (!future.isSuccess()) {
                         throw new IOException("Write operation failed (Chunked).", future.cause());
                     }
-                    writtenBytes += chunkedInput.length();
+                   // writtenBytes += chunkedInput.length();
+                    writtenBytes += nettyBuf.readableBytes();
                 }
             }
+
+        //     if (!hasContentLength && !isWsoc) {
+        //     ChannelFuture lastFuture = nettyChannel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+        //     if (!awaitFuture(lastFuture, timeout)) {
+        //         throw new IOException("Write operation timed out (LastHttpContent).");
+        //     }
+        //     if (!lastFuture.isSuccess()) {
+        //         throw new IOException("Write operation failed (LastHttpContent).", lastFuture.cause());
+        //     }
+        // }
 
             ChannelFuture flushFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
             if (!awaitFuture(flushFuture, timeout)) {
@@ -340,9 +359,15 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                         }
 
                         else {
-                            ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
-                            lastWriteFuture = nettyChannel.writeAndFlush(chunkedInput);
-                            totalWrittenBytes += chunkedInput.length();
+                            //ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
+                            //lastWriteFuture = nettyChannel.writeAndFlush(chunkedInput);
+                            //totalWrittenBytes += chunkedInput.length();
+
+                            ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
+                            DefaultHttpContent httpContent = new DefaultHttpContent(nettyBuf);
+
+                            ChannelFuture future = nettyChannel.writeAndFlush(httpContent);
+                            totalWrittenBytes += nettyBuf.readableBytes();
                         }
 
 //                        ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
