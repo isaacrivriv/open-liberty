@@ -212,12 +212,6 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         
         if (nettyChannel.eventLoop().inEventLoop()) {
 
-            StackTraceElement[] stack = Thread.currentThread().getStackTrace();
-            System.out.println(" MSP -> Current Stack:");
-            for (int i = 2; i < stack.length; i++) {
-                System.out.println(stack[i]);
-            }
-
             throw new IllegalStateException("Cannot invoke a blocking write on the Netty event loop thread.");
         }
 
@@ -242,73 +236,26 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                     writtenBytes += buffer.remaining();
                     AbstractMap.SimpleEntry<Integer, WsByteBuffer> entry = new AbstractMap.SimpleEntry<>(Integer.valueOf(this.streamID), HttpDispatcher.getBufferManager().wrap(WsByteBufferUtils.asByteArray(buffer)));
                     ChannelFuture future = nettyChannel.write(entry);
-                    //awaitChannelFuture(future, timeout, "Write operation timed out (HTTP2 chunk).",
-                    //    "Write operation failed (HTTP2 chunk).");
-                    // if (!awaitFuture(future, timeout)) {
-                    //     throw new IOException("Write operation timed out (HTTP2 chunk).");
-                    // }
-                    // if (!future.isSuccess()) {
-                    //     throw new IOException("Write operation failed (HTTP2 chunk).", future.cause());
-                    // }
 
                 } else if (hasContentLength || isWsoc) {
                     ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                     int bytes = nettyBuf.readableBytes();
-                    //ChannelFuture future = nettyChannel.writeAndFlush(nettyBuf);
                     ChannelFuture future = nettyChannel.write(nettyBuf);
-                   // awaitChannelFuture(future, timeout, "Write operation timed out (hasContentLength/WebSocket).",
-                    //    "Write operation failed (hasContentLength/WebSocket).");
-
-                    // if (!awaitFuture(future, timeout)) {
-                    //     throw new IOException("Write operation timed out (hasContentLength/WebSocket).");
-                    // }
-                    // if (!future.isSuccess()) {
-                    //     throw new IOException("Write operation failed (hasContentLength/WebSocket).", future.cause());
-                    // }
                     writtenBytes += bytes;
 
                 } else {
-                   // ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
-                   // ChannelFuture future = nettyChannel.writeAndFlush(chunkedInput);
 
                     ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                     DefaultHttpContent httpContent = new DefaultHttpContent(nettyBuf);
                 
                     ChannelFuture future = nettyChannel.write(httpContent);
-                   // awaitChannelFuture(future, timeout, "Write operation timed out (Chunked).",
-                    //    "Write operation failed (Chunked).");
-
-                    // if (!awaitFuture(future, timeout)) {
-                    //     throw new IOException("Write operation timed out (Chunked).");
-                    // }
-                    // if (!future.isSuccess()) {
-                    //     throw new IOException("Write operation failed (Chunked).", future.cause());
-                    // }
-                   // writtenBytes += chunkedInput.length();
                     writtenBytes += nettyBuf.readableBytes();
                 }
             }
 
-        //     if (!hasContentLength && !isWsoc) {
-        //     ChannelFuture lastFuture = nettyChannel.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
-        //     if (!awaitFuture(lastFuture, timeout)) {
-        //         throw new IOException("Write operation timed out (LastHttpContent).");
-        //     }
-        //     if (!lastFuture.isSuccess()) {
-        //         throw new IOException("Write operation failed (LastHttpContent).", lastFuture.cause());
-        //     }
-        // }
-
-            //ChannelFuture flushFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
-
             ChannelFuture flushFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
             awaitChannelFuture(flushFuture, timeout, "Flush operation timed out.", "Flush operation failed.");
-            // if (!awaitFuture(flushFuture, timeout)) {
-            //     throw new IOException("Flush operation timed out.");
-            // }
-            // if (!flushFuture.isSuccess()) {
-            //     throw new IOException("Flush operation failed.", flushFuture.cause());
-            // }
+
 
         } catch (InterruptedException e) {
             // Restore interrupt status
@@ -317,22 +264,6 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         }
 
         return writtenBytes;
-    }
-
-
-    private boolean awaitFuture(ChannelFuture future, int timeout) throws InterruptedException {
-        if (timeout == USE_CHANNEL_TIMEOUT) {
-            timeout = 60000;
-        }
-
-        if (timeout == IMMED_TIMEOUT) {
-            return future.isDone();
-        } else if (timeout == NO_TIMEOUT) {
-            future.await();
-            return true;
-        } else {
-            return future.await(timeout, TimeUnit.MILLISECONDS);
-        }
     }
 
 

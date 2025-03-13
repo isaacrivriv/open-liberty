@@ -311,13 +311,6 @@ public class HttpEndpointImpl implements RuntimeUpdateListener, PauseableCompone
         useNetty = ProductInfo.getBetaEdition() &&
                    MetatypeUtils.parseBoolean(config, NettyConstants.USE_NETTY, config.get(NettyConstants.USE_NETTY), true);
 
-        String version = "Mar 12 (2nd JAR)";
-        System.out.println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-        System.out.println("PERFORMANCE JAR VERSION " + version);
-        System.out.println("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-    
-
-
         initializeChains();
 
 
