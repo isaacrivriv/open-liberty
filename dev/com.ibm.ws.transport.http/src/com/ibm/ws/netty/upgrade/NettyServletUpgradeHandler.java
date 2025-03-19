@@ -72,7 +72,6 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        System.out.println("Handler added! " + ctx.channel());
 //        ctx.channel().closeFuture().addListener(future -> {
 //            signalReadReady();
 //        });
@@ -82,14 +81,12 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         // java.io.EOFException: Connection closed: Read failed.  Possible end of stream encountered. local=ip:port remote=ip:port
         if (evt instanceof ChannelInputShutdownEvent) {
-            System.out.println("ChannelInputShutdownEvent kicked off for channel " + channel);
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "NettyServletUpgradeHandler ChannelInputShutdownEvent kicked off for channel " + channel);
             }
             peerClosedConnection.getAndSet(true);
             // If we have data, queue up read signaled
             if (queuedDataSize() > 0) {
-                System.out.println("ChannelInputShutdownEvent queuedDataSize > 0 for channel " + channel);
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(this, tc, "NettyServletUpgradeHandler userEventTriggered found queued data, signaling read for channel " + channel);
                 }
@@ -158,7 +155,6 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        System.out.println("Channel inactive: " + ctx.channel());
 //        signalReadReady();
         super.channelInactive(ctx);
 
