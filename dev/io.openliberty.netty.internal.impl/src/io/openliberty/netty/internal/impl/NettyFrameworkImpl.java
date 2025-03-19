@@ -113,7 +113,11 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
 		parentGroup = new NioEventLoopGroup(1);
 		// specify 0 for the "default" number of threads,
 		// (java.lang.Runtime.availableProcessors() * 2)
-		childGroup = new NioEventLoopGroup(0);
+		int threadNumbers = Integer.parseInt(System.getProperty("io.openliberty.netty.eventloop.threads", "0"));
+		if (threadNumbers < 0)
+			threadNumbers = 0; 
+		System.out.println("Initializing eventloop with number of threads: " + threadNumbers);
+		childGroup = new NioEventLoopGroup(threadNumbers);
 	}
 
 	@Deactivate
