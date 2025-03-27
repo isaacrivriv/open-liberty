@@ -106,8 +106,14 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
     @Override
     public long read(long numBytes, int timeout) throws IOException {
         
+        
         if (!nettyChannel.isActive()) {
             throw new IOException("Netty channel is not active.");
+        }
+        
+        if(!nettyChannel.config().isAutoRead()) {
+            // Do autoread disabled logic
+            nettyChannel.read();
         }
 
                 
@@ -162,7 +168,7 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
 
     @Override
     public VirtualConnection read(long numBytes, TCPReadCompletedCallback callback, boolean forceQueue, int timeout) {
-                
+                        
         //TODO: fix forceQueue
         
         // minBytes = (numBytes<=0) ? 1: numBytes;
@@ -192,6 +198,7 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         }
         
 
+        // Set callback
         if (Objects.nonNull(callback)) {
             upgrade.setReadListener(callback);
         }
@@ -199,6 +206,38 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         upgrade.setVC(vc);
         
         ExecutorService blockingTaskExecutor = HttpDispatcher.getExecutorService();
+        
+        if(!nettyChannel.config().isAutoRead()) {
+            if(timeout == -2) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Timeout hit for channel " + nettyChannel);
+                }
+                StringBuilder error = new StringBuilder();
+                error.append("Socket operation timed out before it could be completed local=");
+                error.append(connectionContext.getLocalAddress().getHostName()).append("/");
+                error.append(connectionContext.getLocalAddress().getHostAddress()).append(":");
+                error.append(connectionContext.getLocalPort());
+                error.append(" remote=");
+                error.append(connectionContext.getRemoteAddress().getHostName()).append("/");
+                error.append(connectionContext.getRemoteAddress().getHostAddress()).append(":");
+                error.append(connectionContext.getRemotePort());
+
+                //throw new IOException("BETA - Timed out waiting on read");
+                HttpDispatcher.getExecutorService().execute(() -> {
+                    try {
+                        upgrade.getReadListener().error(vc, this, new SocketTimeoutException(error.toString()));
+                    } catch (Exception e) {
+                        // Log or handle the exception
+                        e.printStackTrace();
+                    }
+                });
+            } else {
+                // Queue async read
+                upgrade.doAsyncRead(numBytes, timeout);
+            }
+            // Return that it went async by returning null
+            return null;
+        }
         
         blockingTaskExecutor.submit(() -> {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
