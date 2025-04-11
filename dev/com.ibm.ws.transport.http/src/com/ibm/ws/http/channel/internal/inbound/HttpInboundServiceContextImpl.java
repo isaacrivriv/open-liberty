@@ -1089,7 +1089,7 @@ public class HttpInboundServiceContextImpl extends HttpServiceContextImpl implem
         }
         try {
             if (Objects.nonNull(nettyContext)) {
-
+                formatBody(body, null);
                 sendFullOutgoing(body);
             } else {
                 sendFullOutgoing(body, getResponseImpl());
