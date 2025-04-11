@@ -27,6 +27,7 @@ import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.internal.ObjectUtil;
 
+import java.net.SocketTimeoutException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -66,7 +67,8 @@ import java.util.concurrent.TimeUnit;
 public class WriteTimeoutHandler extends ChannelOutboundHandlerAdapter {
     private static final long MIN_TIMEOUT_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
 
-    private final long timeoutNanos;
+    private long timeoutNanos;
+    private boolean closeConnection;
 
     /**
      * A doubly-linked list to track all WriteTimeoutTasks
@@ -82,7 +84,7 @@ public class WriteTimeoutHandler extends ChannelOutboundHandlerAdapter {
      *        write timeout in seconds
      */
     public WriteTimeoutHandler(int timeoutSeconds) {
-        this(timeoutSeconds, TimeUnit.SECONDS);
+        this(timeoutSeconds, TimeUnit.SECONDS, true);
     }
 
     /**
@@ -94,6 +96,23 @@ public class WriteTimeoutHandler extends ChannelOutboundHandlerAdapter {
      *        the {@link TimeUnit} of {@code timeout}
      */
     public WriteTimeoutHandler(long timeout, TimeUnit unit) {
+        this(timeout, unit, false);
+    }
+
+    /**
+     * Creates a new instance.
+     *
+     * @param timeout
+     *        write timeout
+     * @param unit
+     *        the {@link TimeUnit} of {@code timeout}
+     */
+    public WriteTimeoutHandler(long timeout, TimeUnit unit, boolean closeConnection) {
+        setTimeout(timeout, unit);
+        this.closeConnection = closeConnection;
+    }
+
+    public void setTimeout(long timeout, TimeUnit unit) {
         ObjectUtil.checkNotNull(unit, "unit");
 
         if (timeout <= 0) {
@@ -101,6 +120,10 @@ public class WriteTimeoutHandler extends ChannelOutboundHandlerAdapter {
         } else {
             timeoutNanos = Math.max(unit.toNanos(timeout), MIN_TIMEOUT_NANOS);
         }
+    }
+
+     public long getTimeout() {
+        return timeoutNanos;
     }
 
     @Override
@@ -206,7 +229,16 @@ public class WriteTimeoutHandler extends ChannelOutboundHandlerAdapter {
             // See https://github.com/netty/netty/issues/2159
             if (!promise.isDone()) {
                 try {
-                    writeTimedOut(ctx);
+                    if (closeConnection)
+                        writeTimedOut(ctx);
+                    else {
+                        promise.tryFailure(new SocketTimeoutException("Write timed out!!"));
+                    }
+                    // if (!closeConnection) {
+                    //     // Don't actually close the connection but do setFailure to the promise
+                    //     promise.setFailure(new SocketTimeoutException("Write timed out!!"));
+                    // }else
+                    //     writeTimedOut(ctx);
                 } catch (Throwable t) {
                     ctx.fireExceptionCaught(t);
                 }
