@@ -253,7 +253,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
 
 
 
-                pipeline.addBefore("chunkWriteHandler", HTTP_KEEP_ALIVE_HANDLER_NAME, new HttpServerKeepAliveHandler());
+                pipeline.addBefore("transportInboundHandler", HTTP_KEEP_ALIVE_HANDLER_NAME, new HttpServerKeepAliveHandler());
                 //TODO: this is a very large number, check best practice
                 pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_AGGREGATOR_HANDLER_NAME,
                                   new LibertyHttpObjectAggregator(httpConfig.getMessageSizeLimit() == -1 ? maxContentLength : httpConfig.getMessageSizeLimit()));
@@ -302,11 +302,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
             pipeline.addAfter(HTTP_AGGREGATOR_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler());
         }
 
-        
-        pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, "chunkLoggingHandler", new ChunkSizeLoggingHandler());
-        pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, "chunkWriteHandler", new ChunkedWriteHandler());
-        pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new ByteBufferCodec());
-        pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new TransportInboundHandler(httpConfig));
+        pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, "transportInboundHandler", new TransportInboundHandler(httpConfig));
         pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new TransportOutboundHandler(httpConfig));
         if (httpConfig.useForwardingHeaders()) {
             pipeline.addBefore(HTTP_DISPATCHER_HANDLER_NAME, null, new RemoteIpHandler(httpConfig));

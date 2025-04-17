@@ -60,11 +60,6 @@ public class TransportOutboundHandler extends ChannelOutboundHandlerAdapter {
                             ctx.pipeline().remove(HttpServerCodec.class);
                         }
 
-                        ctx.pipeline().remove("maxConnectionHandler");
-                        ctx.pipeline().remove("chunkLoggingHandler");
-                        ctx.pipeline().remove("chunkWriteHandler");
-                        ctx.pipeline().remove(ByteBufferCodec.class);
-
                         if (ctx.pipeline().get(NettyServletUpgradeHandler.class) == null) {
 
                             NettyServletUpgradeHandler upgradeHandler = new NettyServletUpgradeHandler(ctx.channel());
