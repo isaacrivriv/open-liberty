@@ -59,7 +59,7 @@ public class TCPChannelInitializerImpl extends ChannelInitializerWrapper {
     		channel.close();
     		return;
     	}
-        if (TraceComponent.isAnyTracingEnabled()) {
+        if (TraceComponent.isAnyTracingEnabled() && TCPLoggingHandler.tc.isEventEnabled()) {
         	channel.pipeline().addFirst(NettyConstants.TCP_LOGGING_HANDLER_NAME, new TCPLoggingHandler());
 		}
         if (config.getInactivityTimeout() > 0) {
