@@ -196,13 +196,11 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
     }
 
-    private void awaitChannelFuture(ChannelFuture future, int timeout, String timeoutMsg, String failureMsg)
+    private void awaitChannelFuture(ChannelFuture future, String failureMsg)
         throws IOException, InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
         future.addListener(f -> latch.countDown());
-        if (!latch.await(timeout, TimeUnit.MILLISECONDS)) {
-            throw new IOException(timeoutMsg);
-        }
+        latch.await();
         if (!future.isSuccess()) {
             throw new IOException(failureMsg, future.cause());
         }
@@ -267,7 +265,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
             }
 
             ChannelFuture flushFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
-            awaitChannelFuture(flushFuture, timeout, "Flush operation timed out.", "Flush operation failed.");
+            awaitChannelFuture(flushFuture, "Flush operation timed out!");
 
 
         } catch (InterruptedException e) {
