@@ -10,6 +10,7 @@
 package com.ibm.ws.netty.upgrade;
 
 import java.io.EOFException;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -70,12 +71,13 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     public NettyServletUpgradeHandler(Channel channel) {
         this.queue = new CoalescingBufferQueue(channel);
         this.channel = channel;
+        channel.config().setAutoRead(false);
     }
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         // Handler added implies we will be turning off autoRead
-        ctx.channel().config().setAutoRead(false);
+//        ctx.channel().config().setAutoRead(false);
 //        ctx.channel().closeFuture().addListener(future -> {
 //            signalReadReady();
 //        });
@@ -142,14 +144,19 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                         Tr.debug(this, tc, "NettyServletUpgradeHandler channelRead totalBytesRead greater than minimum bytes requested for channel " + channel);
                     }
-                    if(runningAsync.get()) {
-                        // Running asyc so need to notify the callback
-                        setToBuffer();
-                        HttpDispatcher.getExecutorService().submit(() -> {
-                            getReadListener().complete(vc, readContext);
-                        });
-                        runningAsync.set(false);
-                        return;
+                    synchronized (runningAsync) {
+                        if(runningAsync.get()) {
+                            if(Objects.isNull(getReadListener())) {
+                                return;
+                            }
+                            // Running asyc so need to notify the callback
+                            setToBuffer();
+                            runningAsync.set(false);
+                            HttpDispatcher.getExecutorService().submit(() -> {
+                                getReadListener().complete(vc, readContext);
+                            });
+                            return;
+                        }
                     }
                     signalReadReady(); // Signal only if minimum bytes are read
                 }
@@ -413,18 +420,23 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     }
     
     public void doAsyncRead(long numBytes, int timeout) {
-        minBytesToRead = numBytes; // Set the minimum number of bytes to read
-        // TODO: Check if already async and maybe not do a read?
-        // Do we have queued data bigger than numBytes? If so queue up async callback and not do a read
-        if(totalBytesRead > numBytes) {
-            // Running asyc so need to notify the callback
-            setToBuffer();
-            HttpDispatcher.getExecutorService().submit(() -> {
-                getReadListener().complete(vc, readContext);
-            });
-            return;
+        synchronized (runningAsync) {
+            minBytesToRead = numBytes; // Set the minimum number of bytes to read
+            // TODO: Check if already async and maybe not do a read?
+            // Do we have queued data bigger than numBytes? If so queue up async callback and not do a read
+            if(totalBytesRead >= numBytes) {
+                // Running asyc so need to notify the callback
+                if(Objects.isNull(getReadListener())) {
+                    return;
+                }
+                setToBuffer();
+                HttpDispatcher.getExecutorService().submit(() -> {
+                    getReadListener().complete(vc, readContext);
+                });
+                return;
+            }
+            this.runningAsync.set(true);
         }
-        this.runningAsync.set(true);
         this.channel.read();
     }
 

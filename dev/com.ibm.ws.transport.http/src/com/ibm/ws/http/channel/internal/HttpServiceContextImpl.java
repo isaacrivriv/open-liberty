@@ -2296,6 +2296,8 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
         if (isSwitching && "websocket".equalsIgnoreCase(response.headers().get(HttpHeaderNames.UPGRADE))) {
             nettyContext.channel().attr(NettyHttpConstants.PROTOCOL).set("WebSocket");
+            // Because we'll be doing websocket, I'm disabling autoRead here since we should have all the data we need by this point
+            nettyContext.channel().config().setAutoRead(false);
         }
         this.nettyContext.channel().writeAndFlush(response);
 

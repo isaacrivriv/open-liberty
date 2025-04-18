@@ -170,6 +170,7 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
     public VirtualConnection read(long numBytes, TCPReadCompletedCallback callback, boolean forceQueue, int timeout) {
                         
         //TODO: fix forceQueue
+//        new Exception("AsynReadQueued!!!").printStackTrace();
         
         // minBytes = (numBytes<=0) ? 1: numBytes;
 
@@ -184,6 +185,10 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         //Start a new thread that waits to be notified by the handler when enough data is accumulated. On completion, use the callback complete and return null
 
         if (nettyChannel.pipeline().get(NettyServletUpgradeHandler.class) == null) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Found null upgrade handler so adding it through tcp read request context and setting autoread disabled");
+            }
+            nettyChannel.config().setAutoRead(false);
             NettyServletUpgradeHandler upgradeHandler = new NettyServletUpgradeHandler(nettyChannel);
 
             nettyChannel.pipeline().addLast("ServletUpgradeHandler", upgradeHandler);
@@ -208,6 +213,9 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         ExecutorService blockingTaskExecutor = HttpDispatcher.getExecutorService();
         
         if(!nettyChannel.config().isAutoRead()) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Found autoread disabled for channel: " + nettyChannel);
+            }
             if(timeout == -2) {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(this, tc, "Timeout hit for channel " + nettyChannel);
