@@ -63,6 +63,8 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
     private VirtualConnection vc;
     private String streamID = "-1";
+    
+    private int writeTimeout = 60000;
 
     public NettyTCPWriteRequestContext(NettyTCPConnectionContext connectionContext, Channel nettyChannel) {
 
@@ -199,7 +201,12 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
         CountDownLatch latch = new CountDownLatch(1);
         future.addListener(f -> latch.countDown());
-        if (!latch.await(timeout, TimeUnit.MILLISECONDS)) {
+        if (timeout == -1) {
+            latch.await();
+        }
+        else if (timeout == 0 && !latch.await(writeTimeout, TimeUnit.MILLISECONDS)) {
+            throw new IOException(timeoutMsg);
+        }else if (!latch.await(timeout, TimeUnit.MILLISECONDS)) {
             throw new IOException(timeoutMsg);
         }
         if (!future.isSuccess()) {
@@ -209,7 +216,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
     @Override
     public long write(long numBytes, int timeout) throws IOException {
-        
+                
         if (nettyChannel.eventLoop().inEventLoop()) {
 
             throw new IllegalStateException("Cannot invoke a blocking write on the Netty event loop thread.");

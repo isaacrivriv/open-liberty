@@ -292,6 +292,21 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
                 vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "CLOSED_NON_UPGRADED_STREAMS");
                 return;
             }
+            String upgraded = (String) (vc.getStateMap().get(TransportConstants.UPGRADED_CONNECTION));
+            if ("true".equalsIgnoreCase(upgraded)) {
+                Object webConnectionObject = vc.getStateMap().get(TransportConstants.UPGRADED_WEB_CONNECTION_OBJECT);
+                if (webConnectionObject != null && webConnectionObject instanceof TransportConnectionAccess) {
+                    if (webConnectionObject instanceof TransportConnectionAccess) {
+                        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                            Tr.debug(tc, "Found upgraded connection, will add NettyServletUpgradeHandler through close");
+                        }
+                        if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) == null) {
+                            NettyServletUpgradeHandler upgradeHandler = new NettyServletUpgradeHandler(nettyContext.channel());
+                            nettyContext.pipeline().addLast(upgradeHandler);
+                        }
+                    }
+                }
+            }
         }
 
         if (nettyContext.pipeline().get("httpKeepAlive") == null) {
@@ -302,9 +317,10 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             this.isc.clear();
         }
 
-        if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
-            this.nettyContext.channel().close();
-        }
+//        if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
+//            // TODO why are we closing this here?
+//            this.nettyContext.channel().close();
+//        }
 
         return;
 
