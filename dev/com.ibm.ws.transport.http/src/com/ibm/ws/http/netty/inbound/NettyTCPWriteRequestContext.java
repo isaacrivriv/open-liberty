@@ -38,7 +38,9 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.handler.codec.http.DefaultHttpContent;
+import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.codec.http2.StreamSpecificHttpContent;
 import io.netty.handler.stream.ChunkedInput;
 import io.netty.handler.timeout.WriteTimeoutHandler;
 import io.openliberty.http.netty.stream.WsByteBufferChunkedInput;
@@ -246,10 +248,11 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                 if (isH2) {
                     
                     writtenBytes += buffer.remaining();
-                    AbstractMap.SimpleEntry<Integer, WsByteBuffer> entry = new AbstractMap.SimpleEntry<>(Integer.valueOf(this.streamID), HttpDispatcher.getBufferManager().wrap(WsByteBufferUtils.asByteArray(buffer)));
-                    ChannelFuture future = nettyChannel.write(entry);
-
-                } else if (hasContentLength || isWsoc) {
+                    ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
+                    HttpContent httpContent = new StreamSpecificHttpContent(Integer.valueOf(this.streamID), Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer)));
+                    ChannelFuture future = nettyChannel.write(httpContent);
+                  
+                } else if (hasContentLength || isWsoc || isHttp10) {
                     ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                     int bytes = nettyBuf.readableBytes();
                     ChannelFuture future = nettyChannel.write(nettyBuf);
@@ -310,8 +313,9 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
                         if (isH2) {
                             totalWrittenBytes += buffer.remaining();
-                            AbstractMap.SimpleEntry<Integer, WsByteBuffer> entry = new AbstractMap.SimpleEntry<Integer, WsByteBuffer>(Integer.valueOf(this.streamID), HttpDispatcher.getBufferManager().wrap(WsByteBufferUtils.asByteArray(buffer)));
-                            lastWriteFuture = this.nettyChannel.write(entry);
+                            ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
+                            HttpContent httpContent = new StreamSpecificHttpContent(Integer.valueOf(this.streamID), Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer)));
+                            lastWriteFuture = this.nettyChannel.write(httpContent);
 
                         }
 
