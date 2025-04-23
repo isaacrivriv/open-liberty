@@ -108,7 +108,9 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
     private static final byte RIGHT_BRACKET = ']';
 
     /** Request-Resource as a byte[] */
-    private final byte[] myURIBytes = SLASH;
+    private byte[] myURIBytes = SLASH;
+    /** URI as a string */
+    private transient String myURIString = null;
     /** Host string in the request URL (if present) */
     private transient String sUrlHost = null;
     /** Host string parsed from Host header */
@@ -133,6 +135,9 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
         this.nettyContext = nettyContext;
 
         parameters = new HashMap<String, String[]>();
+        this.scheme = isc.isSecure() ? SchemeValues.HTTPS : SchemeValues.HTTP;
+        System.out.println("Initializing request with uri: " + request.uri());
+        parseURI(request.uri().getBytes());
         processQuery();
 
         HttpChannelConfig config = isc instanceof HttpInboundServiceContextImpl ? ((HttpInboundServiceContextImpl) isc).getHttpConfig() : null;
@@ -149,7 +154,6 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
      */
     public void verifyRequest() {
         if (!getMethod().equalsIgnoreCase(HttpMethod.CONNECT.toString())) {
-            setRequestURI(getRequestURI());
             // Additional verification for url host
             String host = request.uri();
             if (null == host || host.isEmpty()) {
@@ -199,6 +203,47 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
         }
         // Need to check if Scheme is also verified by Netty coded or add that ourselves
         // Probably need to add check of authority ourselves as well
+    }
+
+    /**
+     * Parse the URI information out of the input data, along with any query
+     * information found afterwards. If format errors are found, then an
+     * exception is thrown.
+     *
+     * @param data
+     * @throws IllegalArgumentException
+     */
+    private void parseURI(byte[] data) {
+        int start = 0;
+        // at this point, we're parsing /URI [?querystring]
+        if (start >= data.length) {
+            // PK22096 - default to "/" if not found, should have caught empty
+            // string inputs previously (http://host:port is valid)
+            this.myURIBytes = SLASH;
+            if (tc.isDebugEnabled()) {
+                Tr.debug(tc, "Defaulting to slash since no URI data found");
+            }
+            return;
+        }
+        int uri_end = data.length;
+        for (int i = start; i < data.length; i++) {
+            // look for the query string marker
+            if ('?' == data[i]) {
+                uri_end = i;
+                break;
+            }
+        }
+        // save off the URI
+        if (start == uri_end) {
+            // no uri found
+            throw new IllegalArgumentException("Missing URI: " + GenericUtils.getEnglishString(data));
+        }
+        if (0 == start && uri_end == data.length) {
+            this.myURIBytes = data;
+        } else {
+            this.myURIBytes = new byte[uri_end - start];
+            System.arraycopy(data, start, this.myURIBytes, 0, this.myURIBytes.length);
+        }
     }
 
     /**
@@ -356,27 +401,14 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
     }
 
     @Override
-    @FFDCIgnore({ URISyntaxException.class, IllegalArgumentException.class })
     public String getRequestURI() {
         if (getMethod().equalsIgnoreCase(HttpMethod.CONNECT.toString())) {
             return GenericUtils.getEnglishString(SLASH);
         }
-        try {
-            URI requestUri = new URI(request.uri());
-            // If it works it means we have an absolute URI and not a path
-            return requestUri.getRawPath();
-        } catch (URISyntaxException e) {
-            try {
-                return query.path();
-            } catch (IllegalArgumentException e2) {
-                int queryIndex = request.uri().indexOf('?');
-                if (queryIndex == -1)
-                    return request.uri();
-                return request.uri().substring(0, queryIndex);
-            }
-        } catch (Exception e2) {
-            return request.uri();
+        if (null == this.myURIString) {
+            this.myURIString = GenericUtils.getEnglishString(this.myURIBytes);
         }
+        return this.myURIString;
     }
 
     @Override
@@ -452,17 +484,8 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
     }
 
     @Override
-    @FFDCIgnore({ MalformedURLException.class, URISyntaxException.class })
     public void setRequestURI(String uri) {
-        try {
-            URI requestUri = new URL(request.uri()).toURI();
-            // If it works it means we have an absolute URI and not a path
-            setRequestURI(GenericUtils.getEnglishBytes(requestUri.getPath()));
-        } catch (MalformedURLException e) {
-            setRequestURI(GenericUtils.getEnglishBytes(uri));
-        } catch (URISyntaxException e) {
-            setRequestURI(GenericUtils.getEnglishBytes(uri));
-        }
+        setRequestURI(GenericUtils.getEnglishBytes(uri));
     }
 
     @Override
@@ -487,6 +510,7 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
             }
             throw new IllegalArgumentException("Invalid uri: " + value);
         }
+        parseURI(uri);
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "setRequestURI: finished parsing " + getRequestURI());
         }
