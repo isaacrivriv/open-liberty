@@ -136,7 +136,6 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
 
         parameters = new HashMap<String, String[]>();
         this.scheme = isc.isSecure() ? SchemeValues.HTTPS : SchemeValues.HTTP;
-        System.out.println("Initializing request with uri: " + request.uri());
         parseURI(request.uri().getBytes());
         processQuery();
 
