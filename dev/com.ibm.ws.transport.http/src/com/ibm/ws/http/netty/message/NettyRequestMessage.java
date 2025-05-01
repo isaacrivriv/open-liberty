@@ -136,7 +136,6 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
 
         parameters = new HashMap<String, String[]>();
         this.scheme = isc.isSecure() ? SchemeValues.HTTPS : SchemeValues.HTTP;
-        parseURI(request.uri().getBytes());
         processQuery();
 
         HttpChannelConfig config = isc instanceof HttpInboundServiceContextImpl ? ((HttpInboundServiceContextImpl) isc).getHttpConfig() : null;
@@ -178,6 +177,7 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
             else if (host.length() > 1 && '/' == host.charAt(0) && '/' == host.charAt(1) && getServiceContext().getHttpConfig().isStrictURLFormat()) {
                 start = 2;
             } else {
+                parseURI(host.getBytes(), 0);
                 return;
             }
             // authority is [userinfo@] host [:port] "/URI"
@@ -199,6 +199,7 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
                 }
             }
             parseURLHost(host, start, slash_start);
+            parseURI(host.getBytes(), slash_start);
         }
         // Need to check if Scheme is also verified by Netty coded or add that ourselves
         // Probably need to add check of authority ourselves as well
@@ -212,8 +213,7 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
      * @param data
      * @throws IllegalArgumentException
      */
-    private void parseURI(byte[] data) {
-        int start = 0;
+    private void parseURI(byte[] data, int start) {
         // at this point, we're parsing /URI [?querystring]
         if (start >= data.length) {
             // PK22096 - default to "/" if not found, should have caught empty
@@ -509,7 +509,7 @@ public class NettyRequestMessage extends NettyBaseMessage implements HttpRequest
             }
             throw new IllegalArgumentException("Invalid uri: " + value);
         }
-        parseURI(uri);
+        parseURI(uri, 0);
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "setRequestURI: finished parsing " + getRequestURI());
         }
