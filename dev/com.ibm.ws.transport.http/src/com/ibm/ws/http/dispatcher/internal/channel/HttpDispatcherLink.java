@@ -78,6 +78,7 @@ import com.ibm.wsspi.tcpchannel.TCPConnectionContext;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.codec.http.DefaultHttpHeadersFactory;
 import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpResponseStatus;
@@ -209,7 +210,7 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         this.request = new HttpRequestImpl(HttpDispatcher.useEE7Streams());
 
         this.response = new HttpResponseImpl(this);
-        isc.setNettyResponse(new DefaultHttpResponse(nettyRequest.protocolVersion(), HttpResponseStatus.OK));
+        isc.setNettyResponse(new DefaultHttpResponse(nettyRequest.protocolVersion(), HttpResponseStatus.OK, DefaultHttpHeadersFactory.headersFactory().withValidation(false)));
         this.nettyConnectionLink = new NettyConnectionLink(context.channel());
         super.init(nettyVc);
     }
