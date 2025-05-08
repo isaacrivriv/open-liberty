@@ -3342,15 +3342,13 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         }
         setMessageSent();
         // Queue next read request for pipelining
-        HttpDispatcher.getExecutorService().submit(()->{
-            if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
-                }
-            } else {
-                nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
-            }        
-        });
+        if (nettyContext.pipeline().get(LibertyHttpRequestHandler.class) == null) {
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(this, tc, "Could not verify pipelined request because of null handler on channel: " + nettyContext.channel() + " Is this HTTP2?");
+            }
+        } else {
+            nettyContext.pipeline().get(LibertyHttpRequestHandler.class).processNextRequest();
+        }
     }
 
     /**
