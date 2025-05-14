@@ -236,7 +236,8 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         final String protocol = nettyChannel.attr(NettyHttpConstants.PROTOCOL).get();
 
         // A write queue to run all the write events inside the eventloop to improve performance
-        // TODO Maybe we should see if this writequeue should belong to the class to improve performance?
+        // Maybe we should see if this writequeue should belong to the class to improve performance?
+        // See https://github.com/OpenLiberty/open-liberty/issues/31555
         final Queue<Object> writeQueue = new LinkedList<Object>();
         final ChannelPromise writePromise = nettyChannel.newPromise();
       
@@ -259,13 +260,11 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                     writtenBytes += buffer.remaining();
                     ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                     HttpContent httpContent = new StreamSpecificHttpContent(Integer.valueOf(this.streamID), Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer)));
-                    // ChannelFuture future = nettyChannel.write(httpContent);
                     writeQueue.add(httpContent);
                   
                 } else if (hasContentLength || isWsoc || isHttp10) {
                     ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                     int bytes = nettyBuf.readableBytes();
-                    // ChannelFuture future = nettyChannel.write(nettyBuf);
                     writeQueue.add(nettyBuf);
                     writtenBytes += bytes;
 
@@ -273,15 +272,12 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
 
                     ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                     DefaultHttpContent httpContent = new DefaultHttpContent(nettyBuf);
-                    // ChannelFuture future = nettyChannel.write(httpContent);
                     writtenBytes += nettyBuf.readableBytes();
                     writeQueue.add(httpContent);
                 }
             }
 
-            // ChannelFuture flushFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
-            // Run all the operations in the event loop
-
+            // Run all the channel operations in the event loop
             nettyChannel.eventLoop().execute(new Runnable() {
                 @Override
                 public void run() {
@@ -312,7 +308,8 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         // ChannelFuture lastWriteFuture = null;
         boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH) && Objects.nonNull(nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get());
         // A write queue to run all the write events inside the eventloop to improve performance
-        // TODO Maybe we should see if this writequeue should belong to the class to improve performance?
+        // Maybe we should see if this writequeue should belong to the class to improve performance?
+        // See https://github.com/OpenLiberty/open-liberty/issues/31555
         final Queue<Object> writeQueue = new LinkedList<Object>();
         final ChannelPromise writePromise = nettyChannel.newPromise();
         //check if wsoc
@@ -342,7 +339,6 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                             totalWrittenBytes += buffer.remaining();
                             ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                             HttpContent httpContent = new StreamSpecificHttpContent(Integer.valueOf(this.streamID), Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer)));
-                            // lastWriteFuture = this.nettyChannel.write(httpContent);
                             writeQueue.add(httpContent);
 
                         }
@@ -352,35 +348,21 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
                                 Tr.debug(this, tc, "Writing sync on channel: " + nettyChannel + " which is wsoc? " + isWsoc);
                             }
                             ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
-                            // lastWriteFuture = this.nettyChannel.write(nettyBuf); // Write data to the channel
                             totalWrittenBytes += nettyBuf.readableBytes();
                             writeQueue.add(nettyBuf);
                         }
 
                         else {
-                            //ChunkedInput<ByteBuf> chunkedInput = new WsByteBufferChunkedInput(buffer);
-                            //lastWriteFuture = nettyChannel.writeAndFlush(chunkedInput);
-                            //totalWrittenBytes += chunkedInput.length();
-
                             ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
                             DefaultHttpContent httpContent = new DefaultHttpContent(nettyBuf);
-
-                            // lastWriteFuture = nettyChannel.write(httpContent);
                             totalWrittenBytes += nettyBuf.readableBytes();
                             writeQueue.add(httpContent);
                         }
-
-//                        ByteBuf nettyBuf = Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(buffer));
-//                        lastWriteFuture = nettyChannel.write(nettyBuf);
-//                        totalWrittenBytes += nettyBuf.readableBytes();
                     }
                 }
             }
 
-            // lastWriteFuture = nettyChannel.writeAndFlush(Unpooled.EMPTY_BUFFER);
-
-            // Run all the operations in the event loop
-
+            // Run all channel operations in the event loop
             nettyChannel.eventLoop().execute(new Runnable() {
                 @Override
                 public void run() {
