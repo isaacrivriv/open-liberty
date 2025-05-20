@@ -58,6 +58,7 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
     private final Channel nettyChannel;
 
     private WsByteBuffer[] buffers;
+    private Queue<Object> prefixQueue = new LinkedList<Object>();
     private final WsByteBuffer[] defaultBuffers = new WsByteBuffer[1];
     private ByteBuffer byteBufferArray[] = null;
     private ByteBuffer byteBufferArrayDirect[] = null;
@@ -199,6 +200,10 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         }
 
     }
+    
+    public void queuePrefixObject(Object object) {
+        this.prefixQueue.add(object);
+    }
 
     private void awaitChannelFuture(ChannelPromise future, String failureMsg)
         throws IOException, InterruptedException {
@@ -246,6 +251,10 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
         final boolean isH2 = "HTTP2".equals(protocol);
         final boolean hasContentLength = nettyChannel.hasAttr(NettyHttpConstants.CONTENT_LENGTH)
                                          && nettyChannel.attr(NettyHttpConstants.CONTENT_LENGTH).get() != null;
+        
+        while(!prefixQueue.isEmpty()) {
+            writeQueue.add(prefixQueue.poll());
+        }
 
         try {
             for (WsByteBuffer buffer : buffers) {
@@ -327,6 +336,10 @@ public class NettyTCPWriteRequestContext implements TCPWriteRequestContext {
             }
             // If there is nothing to write, return vc since wrote everything we could
             return vc;
+        }
+        
+        while(!prefixQueue.isEmpty()) {
+            writeQueue.add(prefixQueue.poll());
         }
 
         try {
