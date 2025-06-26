@@ -121,7 +121,9 @@ public class CommsOutboundChain implements ApplicationPrereq {
 
         isSecureChain = MetatypeUtils.parseBoolean(OUTBOUND_CHAIN_CONFIG_ALIAS, "useSSL", properties.get("useSSL"), false);
 
-        useNettyTransport = ProductInfo.getBetaEdition() && MetatypeUtils.parseBoolean(OUTBOUND_CHAIN_CONFIG_ALIAS, "useNettyTransport", properties.get("useNettyTransport"), true);
+        // useNettyTransport = ProductInfo.getBetaEdition() && MetatypeUtils.parseBoolean(OUTBOUND_CHAIN_CONFIG_ALIAS, "useNettyTransport", properties.get("useNettyTransport"), true);
+
+        useNettyTransport = true;
 
         String id = (String) properties.get("id");
         chainName = id;

@@ -126,7 +126,8 @@ public class CommsServerServiceFacade implements Singleton {
         //Go ahead and Register JFAPChannel with Channel Framework by providing JFAPServerInboundChannelFactory
         chfw.getFramework().registerFactory("JFAPChannel", JFAPServerInboundChannelFactory.class);
 
-        useNettyTransport = ProductInfo.getBetaEdition() && parseBoolean(CONFIG_ALIAS, "useNettyTransport", properties.get("useNettyTransport"), true);
+        // useNettyTransport = ProductInfo.getBetaEdition() && parseBoolean(CONFIG_ALIAS, "useNettyTransport", properties.get("useNettyTransport"), true);
+        useNettyTransport = true;
         Object cid = properties.get(ComponentConstants.COMPONENT_ID);
         String endpointName = (String) properties.get("id");
         if (endpointName == null)
@@ -151,6 +152,7 @@ public class CommsServerServiceFacade implements Singleton {
     private void modified0(Map<String, Object> properties, boolean fromActivate) {
         if (!fromActivate) {
             boolean modifiedUseNetty = ProductInfo.getBetaEdition() && parseBoolean(CONFIG_ALIAS, "useNettyTransport", properties.get("useNettyTransport"), true);
+            modifiedUseNetty = true;
             if (modifiedUseNetty != useNettyTransport) {
                 throw new IllegalStateException("Cannot change useNettyTransport.");
             }
