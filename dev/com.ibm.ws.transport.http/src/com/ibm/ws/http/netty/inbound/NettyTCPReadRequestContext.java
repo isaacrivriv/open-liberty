@@ -199,129 +199,153 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         upgrade.setVC(vc);
         
         ExecutorService blockingTaskExecutor = HttpDispatcher.getExecutorService();
-        
-        blockingTaskExecutor.submit(() -> {
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                Tr.debug(this, tc, "Starting read in thread async! NumBytes: " + numBytes + ", forceQueue: " + forceQueue + ", timeout: " + timeout + ", channel: " + nettyChannel);
-            }
 
-            boolean dataAvailable = false;
-            try {
-                dataAvailable = upgrade.containsQueuedData() || upgrade.awaitReadReady(numBytes, timeout, TimeUnit.MILLISECONDS);
-            } catch (IllegalStateException e2) {
-                // Do nothing if the read was interrupted
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "Skipping callback logic because read was interrupted! " + nettyChannel);
+        // See if we have queued data
+        
+            // If so and not forcequeue then send the data back
+
+            // If so and forcequeue then do the callback on another thread
+        synchronized(upgrade) {
+            if (upgrade.containsQueuedData() && upgrade.queuedDataSize() >= numBytes) {
+                if(!forceQueue) {
+                    upgrade.setToBuffer();
+                    return vc;
                 }
-                return;
-            } catch (EOFException e) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "EOFException hit for channel " + nettyChannel);
-                }
+                blockingTaskExecutor.submit(() -> {
+                    upgrade.setToBuffer();
+                    callback.complete(vc, this);
+                });
+                return null;
+            }
+            // If no data, then we queue the callback to run once data has been received
+            upgrade.queueAsyncRead();
+            return null;
+        }
+        
+
+        
+//         blockingTaskExecutor.submit(() -> {
+//             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                 Tr.debug(this, tc, "Starting read in thread async! NumBytes: " + numBytes + ", forceQueue: " + forceQueue + ", timeout: " + timeout + ", channel: " + nettyChannel);
+//             }
+
+//             boolean dataAvailable = false;
+//             try {
+//                 dataAvailable = upgrade.containsQueuedData() || upgrade.awaitReadReady(numBytes, timeout, TimeUnit.MILLISECONDS);
+//             } catch (IllegalStateException e2) {
+//                 // Do nothing if the read was interrupted
+//                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                     Tr.debug(this, tc, "Skipping callback logic because read was interrupted! " + nettyChannel);
+//                 }
+//                 return;
+//             } catch (EOFException e) {
+//                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                     Tr.debug(this, tc, "EOFException hit for channel " + nettyChannel);
+//                 }
                 
-                HttpDispatcher.getExecutorService().execute(() -> {
-                    try {
-                        upgrade.getReadListener().error(vc, this, e);
-                    } catch (Exception e2) {
-                        // Log or handle the exception
-                        e2.printStackTrace();
-                    }
-                });
-                return;
-            }
+//                 HttpDispatcher.getExecutorService().execute(() -> {
+//                     try {
+//                         upgrade.getReadListener().error(vc, this, e);
+//                     } catch (Exception e2) {
+//                         // Log or handle the exception
+//                         e2.printStackTrace();
+//                     }
+//                 });
+//                 return;
+//             }
             
-            if(upgrade.isImmediateTimeout()) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "Skipping callback logic because immediate timeout was set! " + nettyChannel);
-                }
-                return;
-            }
+//             if(upgrade.isImmediateTimeout()) {
+//                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                     Tr.debug(this, tc, "Skipping callback logic because immediate timeout was set! " + nettyChannel);
+//                 }
+//                 return;
+//             }
             
-            if (!nettyChannel.isActive()) {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "Channel became inactive before executor and callback is called!" + nettyChannel);
-                }
-                // Channel became inactive while waiting for data, still do the callback for the leftover data left in the channel
-            }
+//             if (!nettyChannel.isActive()) {
+//                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                     Tr.debug(this, tc, "Channel became inactive before executor and callback is called!" + nettyChannel);
+//                 }
+//                 // Channel became inactive while waiting for data, still do the callback for the leftover data left in the channel
+//             }
 
-            if (dataAvailable) {
+//             if (dataAvailable) {
 
-                upgrade.setToBuffer();
+//                 upgrade.setToBuffer();
 
-                if (callback != null) {
+//                 if (callback != null) {
 
-                    if (!forceQueue) {
-                        callback.complete(vc, this);
-                    } else {
+//                     if (!forceQueue) {
+//                         callback.complete(vc, this);
+//                     } else {
 
-                        //TODO change to liberty executor, dont use netty for this.
+//                         //TODO change to liberty executor, dont use netty for this.
 
-                        blockingTaskExecutor.submit(() -> {
-                            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                                Tr.debug(this, tc, "Running async callback! " + nettyChannel);
-                            }
+//                         blockingTaskExecutor.submit(() -> {
+//                             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                                 Tr.debug(this, tc, "Running async callback! " + nettyChannel);
+//                             }
                             
-                            if (!nettyChannel.isActive()) {
-                                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                                    Tr.debug(this, tc, "Channel became inactive before async callback is called! Still calling it " + nettyChannel);
-                                }
-                                // Channel became inactive while waiting for data, still do the callback for the leftover data left in the channel
-                            }
-                            if(upgrade.isImmediateTimeout()) {
-                                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                                    Tr.debug(this, tc, "Skipping callback execution because immediate timeout was set! " + nettyChannel);
-                                }
-                                return;
-                            }
-                            try {
-                                callback.complete(vc, this);
-                            } catch (Exception e) {
-                                // Log or handle the exception
-                                e.printStackTrace();
-                            }
-                        });
-                    }
-                } else {
+//                             if (!nettyChannel.isActive()) {
+//                                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                                     Tr.debug(this, tc, "Channel became inactive before async callback is called! Still calling it " + nettyChannel);
+//                                 }
+//                                 // Channel became inactive while waiting for data, still do the callback for the leftover data left in the channel
+//                             }
+//                             if(upgrade.isImmediateTimeout()) {
+//                                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                                     Tr.debug(this, tc, "Skipping callback execution because immediate timeout was set! " + nettyChannel);
+//                                 }
+//                                 return;
+//                             }
+//                             try {
+//                                 callback.complete(vc, this);
+//                             } catch (Exception e) {
+//                                 // Log or handle the exception
+//                                 e.printStackTrace();
+//                             }
+//                         });
+//                     }
+//                 } else {
                     
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(this, tc, "Skipping null callback!");
-                    }
+//                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                         Tr.debug(this, tc, "Skipping null callback!");
+//                     }
 
-                    //TODO: !isActive shoudl have its own clause/return
-                    //throw new IOException ("BETA - unexpected null callback provided");
-                }
-            } else {
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "Timeout hit for channel " + nettyChannel);
-                }
-                StringBuilder error = new StringBuilder();
-                error.append("Socket operation timed out before it could be completed local=");
-                error.append(connectionContext.getLocalAddress().getHostName()).append("/");
-                error.append(connectionContext.getLocalAddress().getHostAddress()).append(":");
-                error.append(connectionContext.getLocalPort());
-                error.append(" remote=");
-                error.append(connectionContext.getRemoteAddress().getHostName()).append("/");
-                error.append(connectionContext.getRemoteAddress().getHostAddress()).append(":");
-                error.append(connectionContext.getRemotePort());
+//                     //TODO: !isActive shoudl have its own clause/return
+//                     //throw new IOException ("BETA - unexpected null callback provided");
+//                 }
+//             } else {
+//                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                     Tr.debug(this, tc, "Timeout hit for channel " + nettyChannel);
+//                 }
+//                 StringBuilder error = new StringBuilder();
+//                 error.append("Socket operation timed out before it could be completed local=");
+//                 error.append(connectionContext.getLocalAddress().getHostName()).append("/");
+//                 error.append(connectionContext.getLocalAddress().getHostAddress()).append(":");
+//                 error.append(connectionContext.getLocalPort());
+//                 error.append(" remote=");
+//                 error.append(connectionContext.getRemoteAddress().getHostName()).append("/");
+//                 error.append(connectionContext.getRemoteAddress().getHostAddress()).append(":");
+//                 error.append(connectionContext.getRemotePort());
 
-                //throw new IOException("BETA - Timed out waiting on read");
-                HttpDispatcher.getExecutorService().execute(() -> {
-                    try {
-                        upgrade.getReadListener().error(vc, this, new SocketTimeoutException(error.toString()));
-                    } catch (Exception e) {
-                        // Log or handle the exception
-                        e.printStackTrace();
-                    }
-                });
-            }
-            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                Tr.debug(this, tc, "Finished read in thread async! Channel: " + nettyChannel);
-            }
+//                 //throw new IOException("BETA - Timed out waiting on read");
+//                 HttpDispatcher.getExecutorService().execute(() -> {
+//                     try {
+//                         upgrade.getReadListener().error(vc, this, new SocketTimeoutException(error.toString()));
+//                     } catch (Exception e) {
+//                         // Log or handle the exception
+//                         e.printStackTrace();
+//                     }
+//                 });
+//             }
+//             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+//                 Tr.debug(this, tc, "Finished read in thread async! Channel: " + nettyChannel);
+//             }
 
-        });
-   //     }
+//         });
+//    //     }
         
-        return null;
+//         return null;
     }
 
 
