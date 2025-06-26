@@ -56,6 +56,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     private VirtualConnection vc;
     private TCPReadRequestContext readContext;
     private long minBytesToRead = 0;
+    private boolean isReadingAsync = false;
     private AtomicBoolean peerClosedConnection = new AtomicBoolean(false);
 
     private AtomicBoolean immediateTimeout = new AtomicBoolean(false);
@@ -127,13 +128,27 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
             ByteBuf buf = (ByteBuf) msg;
 
             try {
-                buf.retain();
-                queue.add(buf);
-                long bytesRead = buf.readableBytes();
-                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                    Tr.debug(this, tc, "NettyServletUpgradeHandler channelRead called for channel " + channel + " Adding bytes read: " + bytesRead);
+                synchronized(this) {
+                    buf.retain();
+                    queue.add(buf);
+                    long bytesRead = buf.readableBytes();
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(this, tc, "NettyServletUpgradeHandler channelRead called for channel " + channel + " Adding bytes read: " + bytesRead);
+                    }
+                    totalBytesRead += bytesRead;
+                    if(isReadingAsync) {
+                        HttpDispatcher.getExecutorService().execute(() -> {
+                            try {
+                                setToBuffer();
+                                callback.complete(vc, readContext);
+                            } catch (Exception e) {
+                                // Log or handle the exception
+                                e.printStackTrace();
+                            }
+                        });
+                        isReadingAsync = false;
+                    }
                 }
-                totalBytesRead += bytesRead;
 
                 if (totalBytesRead >= minBytesToRead) {
                     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -405,6 +420,10 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
      */
     public void setReadListener(TCPReadCompletedCallback callback) {
         this.callback = callback;
+    }
+
+    public void queueAsyncRead(){
+        this.isReadingAsync = true;
     }
 
     public TCPReadCompletedCallback getReadListener() {
