@@ -167,6 +167,8 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         
         // minBytes = (numBytes<=0) ? 1: numBytes;
 
+        System.out.println("Read called with timeout: " + timeout);
+
         if (!nettyChannel.isActive()) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "Channel became inactive, not queueing read! " + nettyChannel);
@@ -189,6 +191,7 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         if(timeout == -2) {
             // Immediate timeout hit, need to cancel all previous reads
             upgrade.immediateTimeout();
+            return null;
         }
         
 
