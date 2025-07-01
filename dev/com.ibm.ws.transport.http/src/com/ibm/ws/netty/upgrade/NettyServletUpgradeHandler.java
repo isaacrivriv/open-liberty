@@ -10,6 +10,8 @@
 package com.ibm.ws.netty.upgrade;
 
 import java.io.EOFException;
+import java.net.SocketTimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +38,7 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.CoalescingBufferQueue;
 import io.netty.channel.VoidChannelPromise;
 import io.netty.channel.socket.ChannelInputShutdownEvent;
+import io.netty.util.concurrent.ScheduledFuture;
 import io.openliberty.netty.internal.impl.QuiesceState;
 
 /**
@@ -47,6 +50,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
 
     private final CoalescingBufferQueue queue;
     private final Channel channel;
+    private ChannelHandlerContext channelContext;
     private long totalBytesRead = 0;
 
     private final ReentrantLock readLock = new ReentrantLock();
@@ -63,6 +67,9 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     
     private AtomicInteger waitingThreads = new AtomicInteger(0);
 
+    private final AtomicReference<ScheduledFuture<?>> currentTimeout = new AtomicReference<>();
+    private final Runnable timerTask = () -> timeoutFired();
+
     /**
      * Initialize the queue that will store the data
      */
@@ -71,11 +78,55 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
         this.channel = channel;
     }
 
+    private void activateTimer(long timeout){
+        if(channel == null || timeout <= 0){
+            return;
+        }
+        
+        cancelTimer();
+        ScheduledFuture<?> future = channel.eventLoop().schedule(timerTask, timeout, TimeUnit.MILLISECONDS);
+        currentTimeout.set(future);
+    }
+
+    private void timeoutFired(){
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(this, tc, "Timeout hit for channel " + channel + " while reading async? " + isReadingAsync);
+        }
+        StringBuilder error = new StringBuilder();
+        error.append("Socket operation timed out before it could be completed local=");
+        error.append(readContext.getInterface().getLocalAddress().getHostName()).append("/");
+        error.append(readContext.getInterface().getLocalAddress().getHostAddress()).append(":");
+        error.append(readContext.getInterface().getLocalPort());
+        error.append(" remote=");
+        error.append(readContext.getInterface().getRemoteAddress().getHostName()).append("/");
+        error.append(readContext.getInterface().getRemoteAddress().getHostAddress()).append(":");
+        error.append(readContext.getInterface().getRemotePort());
+
+        if(isReadingAsync) {
+            HttpDispatcher.getExecutorService().execute(() -> {
+                try {
+                    getReadListener().error(vc, readContext, new SocketTimeoutException(error.toString()));
+                } catch (Exception e) {
+                    // Log or handle the exception
+                    e.printStackTrace();
+                }
+            });
+            isReadingAsync = false;
+        }
+        else
+            channelContext.fireExceptionCaught(new SocketTimeoutException(error.toString()));
+    }
+
+    private void cancelTimer(){
+        ScheduledFuture<?> current = currentTimeout.getAndSet(null);
+        if(current != null){
+            current.cancel(false); //Do not interrupt thread
+        }
+    }
+
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-//        ctx.channel().closeFuture().addListener(future -> {
-//            signalReadReady();
-//        });
+       channelContext = ctx;
     }
 
     @Override
@@ -178,6 +229,34 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
     public void immediateTimeout() {
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(this, tc, "Inside immediate timeout! " + channel);
+        }
+        synchronized(this) {
+            if(isReadingAsync) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Timeout hit for channel " + channel);
+                }
+                StringBuilder error = new StringBuilder();
+                error.append("Socket operation timed out before it could be completed local=");
+                error.append(readContext.getInterface().getLocalAddress().getHostName()).append("/");
+                error.append(readContext.getInterface().getLocalAddress().getHostAddress()).append(":");
+                error.append(readContext.getInterface().getLocalPort());
+                error.append(" remote=");
+                error.append(readContext.getInterface().getRemoteAddress().getHostName()).append("/");
+                error.append(readContext.getInterface().getRemoteAddress().getHostAddress()).append(":");
+                error.append(readContext.getInterface().getRemotePort());
+
+                //throw new IOException("BETA - Timed out waiting on read");
+                HttpDispatcher.getExecutorService().execute(() -> {
+                    try {
+                        getReadListener().error(vc, readContext, new SocketTimeoutException(error.toString()));
+                    } catch (Exception e) {
+                        // Log or handle the exception
+                        e.printStackTrace();
+                    }
+                });
+                isReadingAsync = false;
+                return;
+            }
         }
         immediateTimeout.getAndSet(true);
         signalReadReady();
