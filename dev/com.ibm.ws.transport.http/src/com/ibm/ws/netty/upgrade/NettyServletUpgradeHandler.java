@@ -188,6 +188,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                     }
                     totalBytesRead += bytesRead;
                     if(isReadingAsync) {
+                        cancelTimer();
                         HttpDispatcher.getExecutorService().execute(() -> {
                             try {
                                 setToBuffer();
@@ -232,6 +233,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
         }
         synchronized(this) {
             if(isReadingAsync) {
+                cancelTimer();
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(this, tc, "Timeout hit for channel " + channel);
                 }
@@ -501,8 +503,10 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
         this.callback = callback;
     }
 
-    public void queueAsyncRead(){
+    public void queueAsyncRead(long timeout){
         this.isReadingAsync = true;
+        if(timeout > 0)
+            activateTimer(timeout);
     }
 
     public TCPReadCompletedCallback getReadListener() {
