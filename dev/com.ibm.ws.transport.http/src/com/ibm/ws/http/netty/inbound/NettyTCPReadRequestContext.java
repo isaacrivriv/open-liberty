@@ -210,18 +210,23 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
             // If so and forcequeue then do the callback on another thread
         synchronized(upgrade) {
             if (upgrade.containsQueuedData() && upgrade.queuedDataSize() >= numBytes) {
+                System.out.println("Contains queued data");
                 if(!forceQueue) {
+                    System.out.println("Force queue false, returning on this thread");
                     upgrade.setToBuffer();
                     return vc;
                 }
+                System.out.println("Force queue true, queueing read in separate thread");
                 blockingTaskExecutor.submit(() -> {
+                    System.out.println("Read queued in separate thread");
                     upgrade.setToBuffer();
                     callback.complete(vc, this);
                 });
                 return null;
             }
             // If no data, then we queue the callback to run once data has been received
-            upgrade.queueAsyncRead();
+            System.out.println("Reading async queued with timeout " + timeout);
+            upgrade.queueAsyncRead(timeout);
             return null;
         }
         
