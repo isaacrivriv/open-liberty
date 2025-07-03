@@ -167,8 +167,6 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
         
         // minBytes = (numBytes<=0) ? 1: numBytes;
 
-        System.out.println("Read called with timeout: " + timeout);
-
         if (!nettyChannel.isActive()) {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "Channel became inactive, not queueing read! " + nettyChannel);
@@ -210,22 +208,17 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
             // If so and forcequeue then do the callback on another thread
         synchronized(upgrade) {
             if (upgrade.containsQueuedData() && upgrade.queuedDataSize() >= numBytes) {
-                System.out.println("Contains queued data");
                 if(!forceQueue) {
-                    System.out.println("Force queue false, returning on this thread");
                     upgrade.setToBuffer();
                     return vc;
                 }
-                System.out.println("Force queue true, queueing read in separate thread");
                 blockingTaskExecutor.submit(() -> {
-                    System.out.println("Read queued in separate thread");
                     upgrade.setToBuffer();
                     callback.complete(vc, this);
                 });
                 return null;
             }
             // If no data, then we queue the callback to run once data has been received
-            System.out.println("Reading async queued with timeout " + timeout);
             upgrade.queueAsyncRead(timeout);
             return null;
         }
