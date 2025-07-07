@@ -3356,7 +3356,11 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
 
             nettyWrite(sendHeaders, true);
         } else if (this.nettyContext.channel().pipeline().get(NettyServletUpgradeHandler.class) == null) {
-            nettyWrite(sendHeaders, true);
+            // Skip writing data and send headers and last http content only
+            if(sendHeaders){
+                sendNettyHeaders();
+            }
+            sendNettyFinalContent();
         }
         setMessageSent();
         // Queue next read request for pipelining
