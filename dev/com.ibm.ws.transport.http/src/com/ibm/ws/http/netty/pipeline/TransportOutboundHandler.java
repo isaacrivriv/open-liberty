@@ -14,6 +14,7 @@ import java.util.Objects;
 import com.ibm.ws.http.channel.internal.HttpChannelConfig;
 import com.ibm.ws.netty.upgrade.NettyServletUpgradeHandler;
 
+import io.openliberty.http.netty.timeout.TimeoutHandler;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -57,6 +58,10 @@ public class TransportOutboundHandler extends ChannelOutboundHandlerAdapter {
                             ctx.pipeline().remove(TransportOutboundHandler.class);
                             if (Objects.nonNull(ctx.pipeline().get(HttpServerCodec.class))) {
                                 ctx.pipeline().remove(HttpServerCodec.class);
+                            }
+
+                            if (Objects.nonNull(ctx.pipeline().get(TimeoutHandler.class))) {
+                                ctx.pipeline().remove(TimeoutHandler.class);
                             }
 
                             if (ctx.pipeline().get(NettyServletUpgradeHandler.class) == null) {

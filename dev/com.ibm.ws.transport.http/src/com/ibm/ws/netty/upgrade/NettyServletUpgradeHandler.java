@@ -136,6 +136,32 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(this, tc, "NettyServletUpgradeHandler ChannelInputShutdownEvent kicked off for channel " + channel);
             }
+
+            if (isReadingAsync) {
+                if (totalBytesRead < minBytesToRead) {
+                    HttpDispatcher.getExecutorService().execute(() -> {
+                        try {
+                            getReadListener().error(vc, readContext, new EOFException("Connection closed: Read failed.  Possible end of stream encountered. local=" + channel.localAddress() + " remote=" + channel.remoteAddress()));
+                        } catch (Exception e) {
+                            // Log or handle the exception
+                            e.printStackTrace();
+                        }
+                    });
+                } else {
+                    HttpDispatcher.getExecutorService().execute(() -> {
+                        try {
+                            setToBuffer();
+                            callback.complete(vc, readContext);
+                        } catch (Exception e) {
+                            // Log or handle the exception
+                            e.printStackTrace();
+                        }
+                    });
+                }
+                isReadingAsync = false;
+            }
+
+
             peerClosedConnection.getAndSet(true);
             // If we have data, queue up read signaled
             if (queuedDataSize() > 0) {
@@ -144,6 +170,7 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                 }
                 signalReadReady();
             }
+
             // Lock thread and kick off immediate timeout
             // Do immediate timeout to stop all read threads
 //            readLock.lock();
@@ -188,6 +215,9 @@ public class NettyServletUpgradeHandler extends ChannelDuplexHandler {
                     }
                     totalBytesRead += bytesRead;
                     if(isReadingAsync) {
+                        if(totalBytesRead < minBytesToRead) {
+                            return;
+                        }
                         cancelTimer();
                         HttpDispatcher.getExecutorService().execute(() -> {
                             try {

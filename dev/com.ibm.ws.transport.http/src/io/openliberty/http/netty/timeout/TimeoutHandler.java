@@ -59,10 +59,16 @@ public class TimeoutHandler extends ChannelDuplexHandler{
         super.channelActive(context);
     }
 
-    @Override 
+    @Override
     public void channelInactive(ChannelHandlerContext context) throws Exception {
         cancelTimer();
         super.channelInactive(context);
+    }
+
+    @Override
+    public void handlerRemoved(ChannelHandlerContext context) throws Exception {
+        cancelTimer();
+        super.handlerRemoved(context);
     }
 
     @Override

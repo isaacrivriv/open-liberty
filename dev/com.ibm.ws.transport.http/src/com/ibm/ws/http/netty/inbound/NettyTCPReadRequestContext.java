@@ -219,6 +219,21 @@ public class NettyTCPReadRequestContext implements TCPReadRequestContext {
                 return null;
             }
             // If no data, then we queue the callback to run once data has been received
+            if (!nettyChannel.isActive()) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(this, tc, "Channel became inactive, not queueing read! " + nettyChannel);
+                }
+                // Channel is not active, call on error
+                HttpDispatcher.getExecutorService().execute(() -> {
+                    try {
+                        upgrade.getReadListener().error(vc, this, new EOFException("Connection closed: Read failed.  Possible end of stream encountered. local=" + nettyChannel.localAddress() + " remote=" + nettyChannel.remoteAddress()));
+                    } catch (Exception e2) {
+                        // Log or handle the exception
+                        e2.printStackTrace();
+                    }
+                });
+                return null; // Return
+            }
             upgrade.queueAsyncRead(timeout);
             return null;
         }
