@@ -50,12 +50,15 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.MultiThreadIoEventLoopGroup;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.concurrent.AutoScalingEventExecutorChooserFactory;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.openliberty.netty.internal.BootstrapConfiguration;
@@ -102,6 +105,25 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
     private ScheduledExecutorService scheduledExecutorService = null;
 
     private static final String EVENTLOOP_THREADS_PROPERTY = "io.openliberty.netty.eventloop.threads";
+    private static final String SCALER_MIN_THREADS_PROPERTY = "io.openliberty.netty.scaler.minThreads";
+    private static final String SCALER_MAX_THREADS_PROPERTY = "io.openliberty.netty.scaler.maxThreads";
+    private static final String SCALER_WINDOW_PROPERTY = "io.openliberty.netty.scaler.window";
+    private static final String SCALER_DOWN_THRESHOLD_PROPERTY = "io.openliberty.netty.scaler.downThreshold";
+    private static final String SCALER_UP_THRESHOLD_PROPERTY = "io.openliberty.netty.scaler.upThreshold";
+    private static final String SCALER_DOWN_STEP_PROPERTY = "io.openliberty.netty.scaler.downStep";
+    private static final String SCALER_UP_STEP_PROPERTY = "io.openliberty.netty.scaler.upStep";
+    private static final String SCALER_CYCLES_PROPERTY = "io.openliberty.netty.scaler.cycles";
+
+    // Defaults for properties
+    private static final int SCALER_MIN_THREADS = 1;
+    private static final int SCALER_MAX_THREADS = 4;
+    private static final int SCALER_WINDOW = 1500;
+    private static final double SCALER_DOWN_THRESHOLD = 0.15;
+    private static final double SCALER_UP_THRESHOLD = 0.85;
+    private static final int SCALER_DOWN_STEP = 1;
+    private static final int SCALER_UP_STEP = 1;
+    private static final int SCALER_CYCLES = 3;
+
 
     @Activate
     protected void activate(ComponentContext context, Map<String, Object> config) {
@@ -112,7 +134,8 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
         // Ideally use the executor service provided by Liberty
         // Compared to channelfw, quiesce is hit every time because
         // connections are lazy cleaned on deactivate
-        parentGroup = new NioEventLoopGroup(1);
+        // parentGroup = new NioEventLoopGroup(1);
+        parentGroup = new MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory());
         // specify 0 for the "default" number of threads,
         // (java.lang.Runtime.availableProcessors() * 2)
         String eventloopThreadNumberProperty;
@@ -126,15 +149,102 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
                 }
             });
         int threadNumber;
-        try {
-            threadNumber = Integer.parseInt(eventloopThreadNumberProperty);
-        } catch (NumberFormatException ex) {
-            threadNumber = 0;
-        }
+        if (System.getSecurityManager() == null)
+            threadNumber = Integer.getInteger(EVENTLOOP_THREADS_PROPERTY, 1);
+        else
+            threadNumber = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+                @Override
+                public Integer run() {
+                    return Integer.getInteger(EVENTLOOP_THREADS_PROPERTY, 1);
+                }
+            });
         if (threadNumber < 0)
-            threadNumber = 0;
+            threadNumber = 1;
+        System.out.println("EVENTLOOP_THREADS: " + threadNumber);
 
-        childGroup = new NioEventLoopGroup(threadNumber);
+        // childGroup = new NioEventLoopGroup(threadNumber);
+        AutoScalingEventExecutorChooserFactory scaler = createThreadScaler();
+        childGroup = new MultiThreadIoEventLoopGroup(threadNumber, null, scaler, NioIoHandler.newFactory());
+    }
+
+    private AutoScalingEventExecutorChooserFactory createThreadScaler() {
+        int minThreads, maxThreads, upStep, downStep, cycles;
+        long windowSize;
+        double downThreshold, upThreshold;
+        if (System.getSecurityManager() == null) {
+            minThreads = Integer.getInteger(SCALER_MIN_THREADS_PROPERTY, SCALER_MIN_THREADS);
+            maxThreads = Integer.getInteger(SCALER_MAX_THREADS_PROPERTY, SCALER_MAX_THREADS);
+            windowSize = Long.getLong(SCALER_WINDOW_PROPERTY, SCALER_WINDOW);
+            downThreshold = parseDouble(SCALER_DOWN_THRESHOLD_PROPERTY, SCALER_DOWN_THRESHOLD);
+            upThreshold = parseDouble(SCALER_UP_THRESHOLD_PROPERTY, SCALER_UP_THRESHOLD);
+            upStep = Integer.getInteger(SCALER_UP_STEP_PROPERTY, SCALER_UP_STEP);
+            downStep = Integer.getInteger(SCALER_DOWN_STEP_PROPERTY, SCALER_DOWN_STEP);
+            cycles = Integer.getInteger(SCALER_CYCLES_PROPERTY, SCALER_CYCLES);
+        }
+        else {
+            minThreads = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+                @Override
+                public Integer run() {
+                    return Integer.getInteger(SCALER_MIN_THREADS_PROPERTY, SCALER_MIN_THREADS);
+                }
+            });
+            maxThreads = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+                @Override
+                public Integer run() {
+                    return Integer.getInteger(SCALER_MAX_THREADS_PROPERTY, SCALER_MAX_THREADS);
+                }
+            });
+            windowSize = AccessController.doPrivileged(new PrivilegedAction<Long>() {
+                @Override
+                public Long run() {
+                    return Long.getLong(SCALER_WINDOW_PROPERTY, SCALER_WINDOW);
+                }
+            });
+            downThreshold = AccessController.doPrivileged(new PrivilegedAction<Double>() {
+                @Override
+                public Double run() {
+                    return parseDouble(SCALER_DOWN_THRESHOLD_PROPERTY, SCALER_DOWN_THRESHOLD);
+                }
+            });
+            upThreshold = AccessController.doPrivileged(new PrivilegedAction<Double>() {
+                @Override
+                public Double run() {
+                    return parseDouble(SCALER_UP_THRESHOLD_PROPERTY, SCALER_UP_THRESHOLD);
+                }
+            });
+            upStep = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+                @Override
+                public Integer run() {
+                    return Integer.getInteger(SCALER_UP_STEP_PROPERTY, SCALER_UP_STEP);
+                }
+            });
+            downStep = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+                @Override
+                public Integer run() {
+                    return Integer.getInteger(SCALER_DOWN_STEP_PROPERTY, SCALER_DOWN_STEP);
+                }
+            });
+            cycles = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+                @Override
+                public Integer run() {
+                    return Integer.getInteger(SCALER_CYCLES_PROPERTY, SCALER_CYCLES);
+                }
+            });
+        }
+        System.out.println("Creating AutoScaler with minThreads: " + minThreads + ", maxThreads: " + maxThreads + ", windowSize: " + windowSize + ", downThreshold: " + downThreshold + ", upThreshold: " + upThreshold + ", upStep: " + upStep + ", downStep: " + downStep + ", cycles: " + cycles);
+        return new AutoScalingEventExecutorChooserFactory(minThreads, maxThreads, windowSize, TimeUnit.MILLISECONDS, downThreshold, upThreshold, upStep, downStep, cycles);
+    }
+
+    private Double parseDouble(String property, double defaultValue) {
+        String parsedProperty = System.getProperty(property);
+        if(parsedProperty == null) {
+            return defaultValue;
+        }
+        try {
+            return Double.parseDouble(parsedProperty);
+        } catch(NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     @Deactivate
