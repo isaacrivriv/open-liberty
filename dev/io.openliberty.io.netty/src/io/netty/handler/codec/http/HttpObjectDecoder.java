@@ -477,7 +477,7 @@ public abstract class HttpObjectDecoder extends ByteToMessageDecoder {
             return;
         }
         /*
-         * everything else after this point takes care of reading chunked content. basically, read chunk size,
+         * Everything else after this point takes care of reading chunked content. Basically, read chunk size,
          * read chunk, read and ignore the CRLF and repeat until 0
          */
         case READ_CHUNK_SIZE: try {
