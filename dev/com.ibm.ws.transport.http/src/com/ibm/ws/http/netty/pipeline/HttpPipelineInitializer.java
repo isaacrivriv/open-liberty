@@ -123,6 +123,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
             pipeline.remove(NettyConstants.INACTIVITY_TIMEOUT_HANDLER_NAME);
         }
        
+        pipeline.channel().config().setOption(ChannelOption.MAX_MESSAGES_PER_READ, 1);
         Tr.debug(tc, "MSP >> HTTP pipeline: " + channel.pipeline().toMap().keySet());
 
         Tr.exit(tc, "initChannel");
@@ -252,7 +253,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
                 //TODO: this is a very large number, check best practice
                 //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_AGGREGATOR_HANDLER_NAME,
                 //                  new LibertyHttpObjectAggregator(httpConfig.getMessageSizeLimit() == -1 ? maxContentLength : httpConfig.getMessageSizeLimit()));
-                pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler(httpConfig));
+                //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler(httpConfig));
                 ctx.pipeline().remove(this);
 
                 ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
@@ -294,7 +295,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
             //TODO: this is a very large number, check best practice
             //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_AGGREGATOR_HANDLER_NAME,
              //                 new LibertyHttpObjectAggregator(httpConfig.getMessageSizeLimit() == -1 ? maxContentLength : httpConfig.getMessageSizeLimit()));
-            pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler(httpConfig));
+            //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler(httpConfig));
             
         }
         pipeline.addBefore(HttpDispatcherHandler.NAME,"transportHandler", TransportHandler.INSTANCE);
