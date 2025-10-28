@@ -33,7 +33,6 @@ import com.ibm.ws.http.netty.NettyHttpConstants;
 import com.ibm.ws.http.netty.pipeline.http2.LibertyNettyALPNHandler;
 import com.ibm.ws.http.netty.pipeline.http2.LibertyUpgradeCodec;
 import com.ibm.ws.http.netty.pipeline.inbound.HttpDispatcherHandler;
-import com.ibm.ws.http.netty.pipeline.inbound.LibertyHttpObjectAggregator;
 import com.ibm.ws.http.netty.pipeline.inbound.LibertyHttpRequestHandler;
 
 import io.netty.channel.Channel;
@@ -123,7 +122,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
             pipeline.remove(NettyConstants.INACTIVITY_TIMEOUT_HANDLER_NAME);
         }
        
-        pipeline.channel().config().setOption(ChannelOption.MAX_MESSAGES_PER_READ, 1);
+        //pipeline.channel().config().setOption(ChannelOption.MAX_MESSAGES_PER_READ, 1);
         Tr.debug(tc, "MSP >> HTTP pipeline: " + channel.pipeline().toMap().keySet());
 
         Tr.exit(tc, "initChannel");
@@ -250,10 +249,6 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
 
                 pipeline.addBefore("transportHandler", HTTP_KEEP_ALIVE_HANDLER_NAME, new HttpServerKeepAliveHandler());
                 ctx.channel().attr(NettyHttpConstants.PROTOCOL).set(ProtocolName.HTTP1.name());
-                //TODO: this is a very large number, check best practice
-                //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_AGGREGATOR_HANDLER_NAME,
-                //                  new LibertyHttpObjectAggregator(httpConfig.getMessageSizeLimit() == -1 ? maxContentLength : httpConfig.getMessageSizeLimit()));
-                //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler(httpConfig));
                 ctx.pipeline().remove(this);
 
                 ctx.fireChannelRead(ReferenceCountUtil.retain(msg));
@@ -292,11 +287,6 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
 
         if (!isHttp2) {
             pipeline.addAfter(NETTY_HTTP_SERVER_CODEC, HTTP_KEEP_ALIVE_HANDLER_NAME, new HttpServerKeepAliveHandler());
-            //TODO: this is a very large number, check best practice
-            //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_AGGREGATOR_HANDLER_NAME,
-             //                 new LibertyHttpObjectAggregator(httpConfig.getMessageSizeLimit() == -1 ? maxContentLength : httpConfig.getMessageSizeLimit()));
-            //pipeline.addAfter(HTTP_KEEP_ALIVE_HANDLER_NAME, HTTP_REQUEST_HANDLER_NAME, new LibertyHttpRequestHandler(httpConfig));
-            
         }
         pipeline.addBefore(HttpDispatcherHandler.NAME,"transportHandler", TransportHandler.INSTANCE);
 
