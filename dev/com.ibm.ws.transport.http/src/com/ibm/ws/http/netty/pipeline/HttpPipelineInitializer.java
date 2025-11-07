@@ -120,9 +120,6 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
         if(Objects.nonNull(pipeline.get(NettyConstants.INACTIVITY_TIMEOUT_HANDLER_NAME))){
             pipeline.remove(NettyConstants.INACTIVITY_TIMEOUT_HANDLER_NAME);
         }
-       
-        //pipeline.channel().config().setOption(ChannelOption.MAX_MESSAGES_PER_READ, 1);
-        Tr.debug(tc, "MSP >> HTTP pipeline: " + channel.pipeline().toMap().keySet());
 
         Tr.exit(tc, "initChannel");
     }
@@ -294,6 +291,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
         if (httpConfig.useForwardingHeaders()) {
             pipeline.addBefore(HttpDispatcherHandler.NAME, RemoteIpHandler.NAME, new RemoteIpHandler(httpConfig));
         }
+        
         
     }
 

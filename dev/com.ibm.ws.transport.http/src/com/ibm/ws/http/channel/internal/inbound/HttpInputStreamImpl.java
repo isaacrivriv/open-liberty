@@ -78,6 +78,9 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
     private volatile String contentEncoding;
     private volatile long rawBytesRead = 0L;
 
+    private volatile long decodedBytesRead;
+    private volatile long decodedBytesProduced = 0L;
+
     private volatile long remainingContentLength = -1L; // -1 => unknown
     private volatile boolean isChunked = false;
 
@@ -125,7 +128,8 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
     }
 
     private boolean isCompressed(String encoding) {
-        return HttpConstants.GZIP.equals(encoding) || HttpConstants.DEFLATE.equals(encoding) || HttpConstants.X_GZIP.equals(encoding);
+        return HttpConstants.GZIP.equalsIgnoreCase(encoding) ||  HttpConstants.X_GZIP.equalsIgnoreCase(encoding) 
+            || HttpConstants.DEFLATE.equalsIgnoreCase(encoding);
     }
 
     public void nettyConfigureStreaming(BodyQueue queue, ChannelHandlerContext context, String contentEncoding) {
@@ -135,9 +139,9 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
 
     /* call from dispatcher handler when headers are parsed and auto-read off */
     public void nettyConfigureStreaming(BodyQueue queue, ChannelHandlerContext context, String contentEncoding, long contentLength, boolean chunked){
-        this.queue = queue;
+        
         this.context = context;
-        this.streaming = true;
+        
         this.contentEncoding = (contentEncoding == null) ? null: contentEncoding.toLowerCase();
         this.decompressor = new HttpContentDecompressor();
 
@@ -147,9 +151,13 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
         this.remainingContentLength = contentLength;
         this.isChunked = chunked;
 
-        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-            Tr.debug(tc, String.format("nettyConfigureStreaming: autoRead=%s, CL=%d, chunked=%s, CE=%s",
-                                       this.autoRead, this.remainingContentLength, this.isChunked, this.contentEncoding));
+        this.bytesRead = 0L;   
+        this.decodedBytesRead = 0L;          
+        this.decodedBytesProduced = 0L;
+
+        if(queue != null){
+            this.queue = queue;
+            this.streaming = true;
         }
     }
 
@@ -291,6 +299,7 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
         } else { // multiRead enabled and first read
             if (getBufferFromChannel()) {
                 // store the channel buffer
+                System.out.println("POST DATA BUFFER ADD : Think it is first read. Size is: "+ postDataBuffer.size());
                 postDataBuffer.add(postDataIndex, this.buffer.duplicate());
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "checkMultiReadBuffer, buffer ->" + postDataBuffer.get(postDataIndex)
@@ -299,7 +308,9 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
                 postDataIndex++;
 
                 // record the new amount of data read from the channel
-                this.bytesRead += this.buffer.remaining();
+                if(!streaming){
+                    this.bytesRead += this.buffer.remaining();
+                }
                 return true;
             }
         }
@@ -321,7 +332,7 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
             }
             int localIx = postDataIndex;
             while (getBufferFromChannel()) {
-
+                System.out.println("POST DATA BUFFER, thinks not all data read . size is: "+postDataBuffer.size());
                 postDataBuffer.add(postDataIndex, this.buffer.duplicate());
 
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -330,7 +341,8 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
                                  + " ,index ->" + postDataIndex);
                 }
                 postDataIndex++;
-
+            
+                if(!streaming)
                 this.bytesRead += this.buffer.remaining(); // record the new amount of data read from the channel
 
                 this.buffer.release(); // release any buffers read
@@ -479,9 +491,6 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
             rc = this.buffer.get() & 0x000000FF;
             this.bytesToCaller++;
         }
-        // if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-        // Tr.debug(tc, "read() rc=" + rc);
-        // }
         return rc;
     }
 
@@ -506,15 +515,7 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
         int avail = this.buffer.remaining();
         int amount = (length > avail) ? avail : length;
         this.buffer.get(output, offset, amount);
-        // if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-        // Tr.debug(tc, "read(byte[],int,int) rc=" + amount);
-        // }
         this.bytesToCaller += amount;
-
-        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-            Tr.debug(tc, String.format("read: delivered=%d, bytesToCaller=%d, availableAfter=%d, readChannelComplete=%s, rawBytesRead=%d, remainingCL=%d",
-                                       amount, this.bytesToCaller, this.buffer.remaining(), this.readChannelComplete, this.rawBytesRead, this.remainingContentLength));
-        }
 
 
 
@@ -627,17 +628,6 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
             firstReadCompleteforMulti = false;
             readChannelComplete = false;
             dataAlreadyReadFromChannel = false;
-
-
-            if (nettyRequest!=null && buffer !=null && buffer.hasRemaining()){
-                postDataBuffer.add(0, buffer.duplicate());
-                postDataIndex = 1;
-                firstReadCompleteforMulti = true;   // we already have everything in this path
-                readChannelComplete = true;
-            } else{
-                //stream from fillFromNettyStreamingNetty
-                postDataIndex = 0;
-            }
         }
     }
 
@@ -677,11 +667,8 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
     }
 
     private boolean fillFromStreamingNetty() throws IOException{
-        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-            Tr.debug(tc, "stream.poll: q=" + queue + " eos=" + (queue!=null && queue.isEos()) 
-                + " wantsInput=" + queue.wantsInput() );
-            
-        }
+
+        if(queue==null) return false;
 
         if(this.buffer != null && this.buffer.hasRemaining()){
             return true;
@@ -690,9 +677,6 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
             this.buffer.release();
             this.buffer = null;
         }
-
-
-        System.out.println("MSP: Entering while(true)");
         while(true){
             ByteBuf fragment = (queue != null) ? queue.poll():null;
             if(fragment == null){
@@ -700,9 +684,6 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
                     this.readChannelComplete = true;
                     if (this.context != null) {
                         ReadFlowHandler.markRequestConsumed(this.context);
-                    }
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(tc, "stream: EOS from queue; no buffered data; returning false");
                     }
                     return false; // EOS
                 }
@@ -714,29 +695,21 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
-                System.out.println("MSP: attempting to read again (loop)");
                 continue;
             }
             try{
-                System.out.println("MSP: has a fragment of data");
-
-                //Copy into WsByteBuffer (this avoids retaining netty memory)
                 int len = fragment.readableBytes();
 
                 this.rawBytesRead += len;
+                this.bytesRead = this.rawBytesRead;
                 if (!isChunked && remainingContentLength >= 0) {
                     remainingContentLength -= len;
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(tc, String.format("stream.raw: got=%d, rawBytesRead=%d, remainingCL=%d",
-                                                   len, rawBytesRead, remainingContentLength));
-                    }
                     if (remainingContentLength <= 0) {
-                        // We have received all promised wire octets; flip EOS proactively
                         this.readChannelComplete = true;
                         if (this.context != null) {
                             ReadFlowHandler.markRequestConsumed(this.context);
                         }
-                        if (queue != null) {
+                        if (queue != null && !queue.isEos()) {
                             queue.signalEos();
                         }
                     }
@@ -776,16 +749,23 @@ public class HttpInputStreamImpl extends HttpInputStreamConnectWeb {
                     if (out != fragmentSource) 
                         fragmentSource.release();
                     this.buffer = out;
-                    this.bytesRead += this.buffer.remaining();
+                    //this.bytesRead += this.buffer.remaining();
+                    this.decodedBytesProduced += this.buffer.remaining();
                     //If multi-read is enabled, store duplicate for next read
-                    if(enableMultiReadofPostData && postDataBuffer !=null){
-                        postDataBuffer.add(postDataIndex, this.buffer.duplicate());
-                        postDataIndex++;
-                    }
-                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-                        Tr.debug(tc, String.format("stream.buffered: produced=%d decodedBytesRead=%d readChannelComplete=%s",
-                                                   buffer.remaining(), this.bytesRead, this.readChannelComplete));
-                    }
+                    // if(enableMultiReadofPostData && postDataBuffer !=null){
+
+                    //     System.out.println("THIS IS LIKELY THE ISSUE IF SEEN TWICE");
+                    //     Thread.dumpStack();
+
+                    //     postDataBuffer.add(postDataIndex, this.buffer.duplicate());
+                    //     System.out.println("POST DATA BUFFER SIZE: " + postDataBuffer.size()+" , index at: "+postDataIndex);
+                    //     postDataIndex++;
+                    // }
+                    // if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    //     Tr.debug(tc, String.format(
+                    //                                "stream.buffered: produced=%d decodedBytesProduced=%d rawBytes=%d readChannelComplete=%s",
+                    //                                buffer.remaining(), this.decodedBytesProduced, this.bytesRead, this.readChannelComplete));
+                    // }
                     return true;
                 } else{
                     //No data produced, compression might need more data
