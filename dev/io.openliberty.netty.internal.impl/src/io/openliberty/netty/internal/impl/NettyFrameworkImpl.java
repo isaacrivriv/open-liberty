@@ -59,6 +59,7 @@ import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.concurrent.AutoScalingEventExecutorChooserFactory;
+import io.netty.util.concurrent.AutoScalingEventExecutorChooserFactory.AutoScalingUtilizationMetric;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.openliberty.netty.internal.BootstrapConfiguration;
@@ -104,67 +105,63 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
 
     private ScheduledExecutorService scheduledExecutorService = null;
 
-    private static final String EVENTLOOP_THREADS_PROPERTY = "io.openliberty.netty.eventloop.threads";
-    private static final String SCALER_MIN_THREADS_PROPERTY = "io.openliberty.netty.scaler.minThreads";
-    private static final String SCALER_MAX_THREADS_PROPERTY = "io.openliberty.netty.scaler.maxThreads";
-    private static final String SCALER_WINDOW_PROPERTY = "io.openliberty.netty.scaler.window";
-    private static final String SCALER_DOWN_THRESHOLD_PROPERTY = "io.openliberty.netty.scaler.downThreshold";
-    private static final String SCALER_UP_THRESHOLD_PROPERTY = "io.openliberty.netty.scaler.upThreshold";
-    private static final String SCALER_DOWN_STEP_PROPERTY = "io.openliberty.netty.scaler.downStep";
-    private static final String SCALER_UP_STEP_PROPERTY = "io.openliberty.netty.scaler.upStep";
-    private static final String SCALER_CYCLES_PROPERTY = "io.openliberty.netty.scaler.cycles";
-
-    // Defaults for properties
-    private static final int SCALER_MIN_THREADS = 1;
-    private static final int SCALER_MAX_THREADS = 4;
-    private static final int SCALER_WINDOW = 1500;
-    private static final double SCALER_DOWN_THRESHOLD = 0.15;
-    private static final double SCALER_UP_THRESHOLD = 0.85;
-    private static final int SCALER_DOWN_STEP = 1;
-    private static final int SCALER_UP_STEP = 1;
-    private static final int SCALER_CYCLES = 3;
-
-
     @Activate
     protected void activate(ComponentContext context, Map<String, Object> config) {
         if (!ProductInfo.getBetaEdition()) {
             // Do nothing if beta isn't enabled
             return;
         }
-        // Ideally use the executor service provided by Liberty
+        // Netty specific configurations for performance
+        if (System.getSecurityManager() == null) {
+            setNettySystemProperties();
+        }
+        else {
+            AccessController.doPrivileged(new PrivilegedAction<Void>() {
+                @Override
+                public Void run() {
+                    setNettySystemProperties();
+                    return null;
+                }
+            });
+        }
         // Compared to channelfw, quiesce is hit every time because
         // connections are lazy cleaned on deactivate
-        // parentGroup = new NioEventLoopGroup(1);
         parentGroup = new MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory());
-        // specify 0 for the "default" number of threads,
-        // (java.lang.Runtime.availableProcessors() * 2)
-        String eventloopThreadNumberProperty;
-        if (System.getSecurityManager() == null)
-            eventloopThreadNumberProperty = System.getProperty(EVENTLOOP_THREADS_PROPERTY, "0");
-        else
-            eventloopThreadNumberProperty = AccessController.doPrivileged(new PrivilegedAction<String>() {
-                @Override
-                public String run() {
-                    return System.getProperty(EVENTLOOP_THREADS_PROPERTY, "0");
-                }
-            });
-        int threadNumber;
-        if (System.getSecurityManager() == null)
-            threadNumber = Integer.getInteger(EVENTLOOP_THREADS_PROPERTY, 1);
-        else
-            threadNumber = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
+        // Attempt to get the properties from the passed configuration but give priority to
+        // the system properties if set
+        int maxThreads;
+        long metricsWindow;
+        if (System.getSecurityManager() == null) {
+            maxThreads = Integer.getInteger(NettyConstants.SCALER_MAX_THREADS_PROPERTY, (Integer)config.getOrDefault(NettyConstants.SCALER_MAX_THREADS_PROPERTY, NettyConstants.SCALER_MAX_THREADS));
+            metricsWindow = Long.getLong(NettyConstants.SCALER_METRICS_WINDOW_PROPERTY, (Long)config.getOrDefault(NettyConstants.SCALER_METRICS_WINDOW_PROPERTY, NettyConstants.SCALER_METRICS_WINDOW));
+        }
+        else {
+            maxThreads = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
                 @Override
                 public Integer run() {
-                    return Integer.getInteger(EVENTLOOP_THREADS_PROPERTY, 1);
+                    return Integer.getInteger(NettyConstants.SCALER_MAX_THREADS_PROPERTY, (Integer)config.getOrDefault(NettyConstants.SCALER_MAX_THREADS_PROPERTY, NettyConstants.SCALER_MAX_THREADS));
                 }
             });
-        if (threadNumber < 0)
-            threadNumber = 1;
-        System.out.println("EVENTLOOP_THREADS: " + threadNumber);
-
-        // childGroup = new NioEventLoopGroup(threadNumber);
+            metricsWindow = AccessController.doPrivileged(new PrivilegedAction<Long>() {
+                @Override
+                public Long run() {
+                    return Long.getLong(NettyConstants.SCALER_METRICS_WINDOW_PROPERTY, (Long)config.getOrDefault(NettyConstants.SCALER_METRICS_WINDOW_PROPERTY, NettyConstants.SCALER_METRICS_WINDOW));
+                }
+            });
+        }
         AutoScalingEventExecutorChooserFactory scaler = createThreadScaler();
-        childGroup = new MultiThreadIoEventLoopGroup(threadNumber, null, scaler, NioIoHandler.newFactory());
+        childGroup = new MultiThreadIoEventLoopGroup(maxThreads, null, scaler, NioIoHandler.newFactory());
+        if (metricsWindow > 0) {
+            scheduledExecutorService.scheduleAtFixedRate(() -> {
+                StringBuilder sb = new StringBuilder("Getting metrics from MultiThreadIoEventLoopGroup with active threads " + ((MultiThreadIoEventLoopGroup)childGroup).activeExecutorCount() + " : ");
+                for (AutoScalingUtilizationMetric metric : ((MultiThreadIoEventLoopGroup)childGroup).executorUtilizations()) {
+                    sb.append("Thread@" + Integer.toHexString(metric.executor().hashCode()) + " -> " + String.format("%.2f", metric.utilization()*100.0) + "%, ");
+                }
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, sb.toString());
+                }
+            }, metricsWindow, metricsWindow, TimeUnit.MILLISECONDS);
+        }
     }
 
     private AutoScalingEventExecutorChooserFactory createThreadScaler() {
@@ -172,66 +169,68 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
         long windowSize;
         double downThreshold, upThreshold;
         if (System.getSecurityManager() == null) {
-            minThreads = Integer.getInteger(SCALER_MIN_THREADS_PROPERTY, SCALER_MIN_THREADS);
-            maxThreads = Integer.getInteger(SCALER_MAX_THREADS_PROPERTY, SCALER_MAX_THREADS);
-            windowSize = Long.getLong(SCALER_WINDOW_PROPERTY, SCALER_WINDOW);
-            downThreshold = parseDouble(SCALER_DOWN_THRESHOLD_PROPERTY, SCALER_DOWN_THRESHOLD);
-            upThreshold = parseDouble(SCALER_UP_THRESHOLD_PROPERTY, SCALER_UP_THRESHOLD);
-            upStep = Integer.getInteger(SCALER_UP_STEP_PROPERTY, SCALER_UP_STEP);
-            downStep = Integer.getInteger(SCALER_DOWN_STEP_PROPERTY, SCALER_DOWN_STEP);
-            cycles = Integer.getInteger(SCALER_CYCLES_PROPERTY, SCALER_CYCLES);
+            minThreads = Integer.getInteger(NettyConstants.SCALER_MIN_THREADS_PROPERTY, NettyConstants.SCALER_MIN_THREADS);
+            maxThreads = Integer.getInteger(NettyConstants.SCALER_MAX_THREADS_PROPERTY, NettyConstants.SCALER_MAX_THREADS);
+            windowSize = Long.getLong(NettyConstants.SCALER_WINDOW_PROPERTY, NettyConstants.SCALER_WINDOW);
+            downThreshold = parseDouble(NettyConstants.SCALER_DOWN_THRESHOLD_PROPERTY, NettyConstants.SCALER_DOWN_THRESHOLD);
+            upThreshold = parseDouble(NettyConstants.SCALER_UP_THRESHOLD_PROPERTY, NettyConstants.SCALER_UP_THRESHOLD);
+            upStep = Integer.getInteger(NettyConstants.SCALER_UP_STEP_PROPERTY, NettyConstants.SCALER_UP_STEP);
+            downStep = Integer.getInteger(NettyConstants.SCALER_DOWN_STEP_PROPERTY, NettyConstants.SCALER_DOWN_STEP);
+            cycles = Integer.getInteger(NettyConstants.SCALER_CYCLES_PROPERTY, NettyConstants.SCALER_CYCLES);
         }
         else {
             minThreads = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
                 @Override
                 public Integer run() {
-                    return Integer.getInteger(SCALER_MIN_THREADS_PROPERTY, SCALER_MIN_THREADS);
+                    return Integer.getInteger(NettyConstants.SCALER_MIN_THREADS_PROPERTY, NettyConstants.SCALER_MIN_THREADS);
                 }
             });
             maxThreads = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
                 @Override
                 public Integer run() {
-                    return Integer.getInteger(SCALER_MAX_THREADS_PROPERTY, SCALER_MAX_THREADS);
+                    return Integer.getInteger(NettyConstants.SCALER_MAX_THREADS_PROPERTY, NettyConstants.SCALER_MAX_THREADS);
                 }
             });
             windowSize = AccessController.doPrivileged(new PrivilegedAction<Long>() {
                 @Override
                 public Long run() {
-                    return Long.getLong(SCALER_WINDOW_PROPERTY, SCALER_WINDOW);
+                    return Long.getLong(NettyConstants.SCALER_WINDOW_PROPERTY, NettyConstants.SCALER_WINDOW);
                 }
             });
             downThreshold = AccessController.doPrivileged(new PrivilegedAction<Double>() {
                 @Override
                 public Double run() {
-                    return parseDouble(SCALER_DOWN_THRESHOLD_PROPERTY, SCALER_DOWN_THRESHOLD);
+                    return parseDouble(NettyConstants.SCALER_DOWN_THRESHOLD_PROPERTY, NettyConstants.SCALER_DOWN_THRESHOLD);
                 }
             });
             upThreshold = AccessController.doPrivileged(new PrivilegedAction<Double>() {
                 @Override
                 public Double run() {
-                    return parseDouble(SCALER_UP_THRESHOLD_PROPERTY, SCALER_UP_THRESHOLD);
+                    return parseDouble(NettyConstants.SCALER_UP_THRESHOLD_PROPERTY, NettyConstants.SCALER_UP_THRESHOLD);
                 }
             });
             upStep = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
                 @Override
                 public Integer run() {
-                    return Integer.getInteger(SCALER_UP_STEP_PROPERTY, SCALER_UP_STEP);
+                    return Integer.getInteger(NettyConstants.SCALER_UP_STEP_PROPERTY, NettyConstants.SCALER_UP_STEP);
                 }
             });
             downStep = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
                 @Override
                 public Integer run() {
-                    return Integer.getInteger(SCALER_DOWN_STEP_PROPERTY, SCALER_DOWN_STEP);
+                    return Integer.getInteger(NettyConstants.SCALER_DOWN_STEP_PROPERTY, NettyConstants.SCALER_DOWN_STEP);
                 }
             });
             cycles = AccessController.doPrivileged(new PrivilegedAction<Integer>() {
                 @Override
                 public Integer run() {
-                    return Integer.getInteger(SCALER_CYCLES_PROPERTY, SCALER_CYCLES);
+                    return Integer.getInteger(NettyConstants.SCALER_CYCLES_PROPERTY, NettyConstants.SCALER_CYCLES);
                 }
             });
         }
-        System.out.println("Creating AutoScaler with minThreads: " + minThreads + ", maxThreads: " + maxThreads + ", windowSize: " + windowSize + ", downThreshold: " + downThreshold + ", upThreshold: " + upThreshold + ", upStep: " + upStep + ", downStep: " + downStep + ", cycles: " + cycles);
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "Creating AutoScaler with minThreads: " + minThreads + ", maxThreads: " + maxThreads + ", windowSize: " + windowSize + ", downThreshold: " + downThreshold + ", upThreshold: " + upThreshold + ", upStep: " + upStep + ", downStep: " + downStep + ", cycles: " + cycles);
+        }
         return new AutoScalingEventExecutorChooserFactory(minThreads, maxThreads, windowSize, TimeUnit.MILLISECONDS, downThreshold, upThreshold, upStep, downStep, cycles);
     }
 
@@ -244,6 +243,52 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
             return Double.parseDouble(parsedProperty);
         } catch(NumberFormatException e) {
             return defaultValue;
+        }
+    }
+
+    /**
+     * Creates a Netty Dynamic Autoscaler based off the values in the passed config map.
+     *
+     * @param config Bundle config containing the necessary items for the Auto Scaler
+     */
+    private AutoScalingEventExecutorChooserFactory createThreadScaler(Map<String, Object> config) {
+        if(config == null) {
+            throw new IllegalArgumentException("Passed config object that was null!!");
+        }
+        int minThreads, maxThreads, upStep, downStep, cycles;
+        long windowSize;
+        double downThreshold, upThreshold;
+        minThreads = (Integer)config.getOrDefault(NettyConstants.SCALER_MIN_THREADS_PROPERTY, NettyConstants.SCALER_MIN_THREADS);
+        maxThreads = (Integer)config.getOrDefault(NettyConstants.SCALER_MAX_THREADS_PROPERTY, NettyConstants.SCALER_MAX_THREADS);
+        upStep = (Integer)config.getOrDefault(NettyConstants.SCALER_UP_STEP_PROPERTY, NettyConstants.SCALER_UP_STEP);
+        downStep = (Integer)config.getOrDefault(NettyConstants.SCALER_DOWN_STEP_PROPERTY, NettyConstants.SCALER_DOWN_STEP);
+        cycles = (Integer)config.getOrDefault(NettyConstants.SCALER_CYCLES_PROPERTY, NettyConstants.SCALER_CYCLES);
+        windowSize = (Long)config.getOrDefault(NettyConstants.SCALER_WINDOW_PROPERTY, NettyConstants.SCALER_WINDOW);
+        downThreshold = (Double)config.getOrDefault(NettyConstants.SCALER_DOWN_THRESHOLD_PROPERTY, NettyConstants.SCALER_DOWN_THRESHOLD);
+        upThreshold = (Double)config.getOrDefault(NettyConstants.SCALER_UP_THRESHOLD_PROPERTY, NettyConstants.SCALER_UP_THRESHOLD);
+        if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "Creating AutoScaler from config with minThreads: " + minThreads + ", maxThreads: " + maxThreads + ", windowSize: " + windowSize + ", downThreshold: " + downThreshold + ", upThreshold: " + upThreshold + ", upStep: " + upStep + ", downStep: " + downStep + ", cycles: " + cycles);
+        }
+        return new AutoScalingEventExecutorChooserFactory(minThreads, maxThreads, windowSize, TimeUnit.MILLISECONDS, downThreshold, upThreshold, upStep, downStep, cycles);
+    }
+
+    /**
+     * Method for setting Netty system properties default if not already set.
+     */
+    private void setNettySystemProperties() {
+        // If the properties are not already manually set in the system, set the defaults
+        // tested to bring the best performance
+        if (System.getProperty("io.netty.leakDetection.level") == null) {
+            // Netty's buffer leak detection is enabled by default which is unnecessary unless
+            // issues are found and leak detection is needed to debug them.
+            System.setProperty("io.netty.leakDetection.level", "DISABLED");
+        }
+        if (System.getProperty("io.netty.allocator.type") == null) {
+            // On Netty version 4.2, the default allocator changed from pooled to adaptive and so
+            // as of that moment, the adaptive allocator showed a regression from the pooled allocator
+            // used in Netty 4.1. We switch to the pooled allocator for the moment until these issues
+            // are addressed
+            System.setProperty("io.netty.allocator.type", "pooled");
         }
     }
 
@@ -263,7 +308,7 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
     @Modified
     protected void modified(ComponentContext context, Map<String, Object> config) {
         if (TraceComponent.isAnyTracingEnabled() && tc.isEventEnabled()) {
-            Tr.event(this, tc, "Processing config", config);
+            Tr.event(this, tc, "Config updates are not currently implemented! Config will be ignored: ", config);
         }
         // update any framework-specific config
     }

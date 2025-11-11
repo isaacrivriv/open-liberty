@@ -34,6 +34,9 @@ Private-Package: \
   com.ibm.ws.udpchannel.internal.resources, \
   com.ibm.ws.channelfw.internal.resources
 
+Include-Resource: \
+    OSGI-INF=resources/OSGI-INF
+
 -dsannotations: \
   io.openliberty.netty.internal.impl.NettyFrameworkImpl
 
