@@ -330,6 +330,22 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             }
         }
 
+        if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
+            ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
+            if (this.isc != null) {
+                if (!this.isc.isBodyComplete()) {
+                    deferClear.set(true);
+                } else {
+                    this.isc.clear();
+                }
+            }
+
+            if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                Tr.debug(tc, "nettyClose: upgraded connection; not closing channel");
+            }
+            return;
+        }
+
         if (nettyContext.pipeline().get("httpKeepAlive") == null || nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
 
             ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
@@ -342,22 +358,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
                 this.isc.clear();
             }
         }
-
-        // if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
-        //     ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
-        //     if (this.isc != null) {
-        //         if (!this.isc.isBodyComplete()) {
-        //             deferClear.set(true);
-        //         } else {
-        //             this.isc.clear();
-        //         }
-        //     }
-
-        //     if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
-        //         Tr.debug(tc, "nettyClose: upgraded connection; not closing channel");
-        //     }
-        //     return;
-        // }
 
         // Needed to match channel behavior. Related to HttpOptions' ignoreWriteAfterCommit config.
         if(e != null) {
@@ -648,7 +648,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             ((NettyRequestMessage)isc.getRequest()).verifyRequest();
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 String ae = isc.getRequest().getHeader(HttpHeaderKeys.HDR_ACCEPT_ENCODING).asString();
-                Tr.debug(tc, "MSP >>>Negotiation: Accept-Encoding seen by transport: [" + ae + "]");
             }
         } catch (IllegalArgumentException iae) {
             //no FFDC required
@@ -769,13 +768,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             sendResponse(StatusCodes.UNAVAILABLE, null, false);
             return;
         }
-
-        // Initialize the request body / get the message
-        // if(this.nettyRequest != null){
-        //     this.request.init(this.nettyRequest,isc);
-        // }else{
-        //     this.request.init(isc);
-        // }
 
         this.request.init(isc);
         // Try to find a virtual host for the requested host/port..
