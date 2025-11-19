@@ -40,8 +40,19 @@ Import-Package: \
   !org.slf4j*,\
   !reactor.blockhound.*,\
   !sun.*,\
+  !com.fasterxml.jackson*,\
+  !io.netty.channel.epoll*,\
+  !io.netty.channel.kqueue*,\
+  !io.netty.channel.uring*,\
+  !io.netty.handler.codec.dns*,\
+  !io.netty.handler.codec.haproxy*,\
+  !io.netty.resolver.dns*,\
+  !io.vertx.codegen.annotations*,\
+  !io.vertx.core.internal.logging*,\
   *
 
+Include-Resource: \
+   @lib/vertx-core-5.0.5.jar
 
 Export-Package: \
   !io.netty.handler.ssl.*,\
@@ -52,6 +63,7 @@ instrument.disabled: true
 -fixupmessages.missingexport: "Used bundle version * for exported package";is:=ignore
 
 -buildpath: \
+  lib/vertx-core-5.0.5.jar;version=file,\
   io.netty:netty-buffer;version=${nettyVersion},\
   io.netty:netty-codec;version=${nettyVersion},\
   io.netty:netty-codec-base;version=${nettyVersion},\

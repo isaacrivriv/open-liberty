@@ -28,6 +28,8 @@ import static io.netty.handler.codec.http.HttpObjectDecoder.DEFAULT_MAX_HEADER_S
 import static io.netty.handler.codec.http.HttpObjectDecoder.DEFAULT_MAX_INITIAL_LINE_LENGTH;
 import static io.netty.handler.codec.http.HttpObjectDecoder.DEFAULT_VALIDATE_HEADERS;
 
+import io.vertx.core.http.impl.VertxHttpRequestDecoder;
+
 /**
  * A combination of {@link HttpRequestDecoder} and {@link HttpResponseEncoder}
  * which enables easier server side HTTP implementation.
@@ -155,7 +157,8 @@ public final class HttpServerCodec extends CombinedChannelDuplexHandler<HttpRequ
      * Creates a new instance with the specified decoder configuration.
      */
     public HttpServerCodec(HttpDecoderConfig config) {
-        init(new HttpServerRequestDecoder(config), new HttpServerResponseEncoder());
+        init(new VertxHttpRequestDecoder(new io.vertx.core.http.HttpServerOptions()), new HttpServerResponseEncoder());
+        // init(new HttpServerRequestDecoder(config), new HttpServerResponseEncoder());
     }
 
     /**
