@@ -71,7 +71,7 @@ public class SRTOutputStream extends javax.servlet.ServletOutputStream implement
     
     if (fastCheck == 1) {            
         // make sure the flush is not ignored
-        ((WCOutputStream) _conn).flush(false);
+        ((WCOutputStream) _conn).flush(true);
 
     } else {
 

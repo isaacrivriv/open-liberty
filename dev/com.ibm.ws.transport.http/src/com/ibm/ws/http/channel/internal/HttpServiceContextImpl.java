@@ -3745,8 +3745,16 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
                 Tr.debug(tc, "Writing " + writeBuffers.length + " buffers on netty channel.");
             }
             
+            if(sendHeaders && finalWrite) {
+                // Set full http object to write the entire response in a single go for perf
+                NettyResponseMessage resp = (NettyResponseMessage) getResponse();
+                HttpHeaders trailers = resp.getNettyTrailers();
+                DefaultFullHttpResponse fullResponse = new DefaultFullHttpResponse(nettyResponse.protocolVersion(), nettyResponse.status(), Unpooled.wrappedBuffer(WsByteBufferUtils.asByteArray(writeBuffers)), nettyResponse.headers(), trailers);
+                nettyContext.channel().writeAndFlush(fullResponse);
+                return;
+            }
             // If sendHeaders, we add the headers to the write interface to be written when data is written
-            if(sendHeaders) {
+            else if(sendHeaders) {
                 // Set prefix object on Netty Write Request Context
                 ((NettyTCPWriteRequestContext)getTSC().getWriteInterface()).queuePrefixObject(nettyResponse);
             }
