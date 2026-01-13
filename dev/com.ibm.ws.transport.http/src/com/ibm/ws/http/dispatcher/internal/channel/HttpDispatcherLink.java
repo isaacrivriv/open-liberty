@@ -295,8 +295,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
 
 
     public void nettyClose(VirtualConnection conn, Exception e) {
-
-        System.out.println("Netty close called");
         Thread.currentThread().dumpStack();
 
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
@@ -315,9 +313,7 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         }
 
         boolean fatalUpgrade = false;
-        System.out.println("DEBUG: nettyClose checking fatal flag...");
         if (vc != null) {
-            System.out.println(vc.getStateMap());
             Object fatal = vc.getStateMap().get(TransportConstants.UPGRADED_FATAL_ERROR);
             if ("true".equalsIgnoreCase(String.valueOf(fatal))) {
                 fatalUpgrade = true;
@@ -342,7 +338,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "Closing connection. Error occurred -> " + e.getMessage());
             }
-            System.out.println("DEBUG: nettyClose - Close on channel on error path");
             ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             this.nettyContext.channel().close();
             return;
@@ -370,7 +365,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         
 
         if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
-            System.out.println("DEBUG netty close - should not close on upgrade handler present");
             ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             if (this.isc != null) {
                 if (!this.isc.isBodyComplete()) {
@@ -387,7 +381,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         }
 
         if (nettyContext.pipeline().get("httpKeepAlive") == null) {
-            System.out.println("DEBUG: close on keepalive missing: " + nettyContext.pipeline().get("httpKeepAlive") == null);
             ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             this.nettyContext.channel().close();
         }else {
@@ -558,8 +551,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
      */
     @Override
     public void destroy(Exception e) {
-
-        System.out.println("DEBUG: dispatcher link destroy called");
         if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
             Tr.debug(tc, "Destroy with exc=" + e);
         }
