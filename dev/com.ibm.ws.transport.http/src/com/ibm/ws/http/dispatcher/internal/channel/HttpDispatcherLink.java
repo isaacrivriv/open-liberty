@@ -22,12 +22,14 @@ import java.security.PrivilegedAction;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.TimeUnit;
 
 import com.ibm.websphere.ras.Tr;
 import com.ibm.websphere.ras.TraceComponent;
@@ -53,8 +55,7 @@ import com.ibm.ws.http.netty.NettyVirtualConnectionImpl;
 import com.ibm.ws.http.netty.message.NettyRequestMessage;
 import com.ibm.ws.http.netty.pipeline.RemoteIpHandler;
 import com.ibm.ws.http.netty.pipeline.inbound.LibertyHttpRequestHandler;
-import com.ibm.ws.http.netty.pipeline.inbound.ReadFlowHandler;
-import com.ibm.ws.http.netty.pipeline.inbound.ReadFlowHandler.FlowState;
+import com.ibm.ws.http.netty.pipeline.inbound.read.ReadFlowHandler;
 import com.ibm.ws.netty.upgrade.NettyServletUpgradeHandler;
 import com.ibm.ws.transport.access.TransportConnectionAccess;
 import com.ibm.ws.transport.access.TransportConstants;
@@ -176,6 +177,7 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
     private ConnectionLink nettyConnectionLink;
     private FullHttpRequest nettyHeaderOnly;
     private AtomicBoolean deferClear = new AtomicBoolean(false);
+    private AtomicBoolean closeNonUpgradedDeferred = new AtomicBoolean(false);
 
     /**
      * Constructor.
@@ -246,13 +248,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             Tr.debug(tc, "New conn(streaming): netty context=" + ctx);
         }
 
-        ctx.channel().config().setAutoRead(false);
-        
-        if (ctx.pipeline().get(ReadFlowHandler.class)==null){
-            ReadFlowHandler flowHandler = new ReadFlowHandler();
-            ctx.pipeline().addLast("readFlowHandler", flowHandler);
-        }
-
         NettyVirtualConnectionImpl nettyVc = NettyVirtualConnectionImpl.createVC();
         this.nettyContext = ctx;
         this.isc = new HttpInboundServiceContextImpl(ctx, nettyVc, config);
@@ -307,7 +302,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "Doing nothing on close since Netty request is HTTP2 enabled. Codec will handle shutdown");
             }
-            ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             return;
         }
 
@@ -324,7 +318,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "nettyClose: closing upgraded connection due to fatal upgrade error flag");
             }
-            ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             if (this.isc != null) {
                 this.isc.clear();
             }
@@ -337,7 +330,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                 Tr.debug(tc, "Closing connection. Error occurred -> " + e.getMessage());
             }
-            ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             this.nettyContext.channel().close();
             return;
         }
@@ -347,6 +339,13 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
             if (closeNonUpgraded != null && closeNonUpgraded.equalsIgnoreCase("true")) {
                 if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
                     Tr.debug(tc, "close streams from HttpDispatcherLink.close");
+                }
+
+                if(deferCloseNonUpgrade()){
+                    if(vc!=null){
+                        vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "DEFERRED_NON_UPGRADED_STREAMS");
+                    }
+                    return;
                 }
 
                 // This close streams should be synchronous to match with legacy
@@ -364,7 +363,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         
 
         if (nettyContext.pipeline().get(NettyServletUpgradeHandler.class) != null) {
-            ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             if (this.isc != null) {
                 if (!this.isc.isBodyComplete()) {
                     deferClear.set(true);
@@ -380,7 +378,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         }
 
         if (nettyContext.pipeline().get("httpKeepAlive") == null) {
-            ReadFlowHandler.setClosedOrUpgraded(this.nettyContext);
             this.nettyContext.channel().close();
         }else {
 
@@ -390,9 +387,6 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
                 this.isc.clear();
             }
         }
-
-        
-
         return;
 
     }
@@ -446,6 +440,14 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
 
                 currentBuffer = null;
                 vc.getStateMap().put(TransportConstants.NOT_UPGRADED_UNREAD_DATA, newBuffer);
+            }
+
+            if(deferCloseNonUpgrade()){
+                vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "DEFERRED_CLOSE_NON_UPGRADED_STREAMS");
+                if(TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "close, deferring CLOSE_NON_UPGRADED_STREAMS until upgrade ready");
+                }
+                return;
             }
 
             Exception errorinClosing = this.closeStreams();
@@ -1905,4 +1907,46 @@ public class HttpDispatcherLink extends InboundApplicationLink implements HttpIn
         }
     }
 
+    private boolean deferCloseNonUpgrade(){
+        if(nettyContext == null){
+            return false;
+        }
+        Object promiseObj = nettyContext.channel().attr(NettyHttpConstants.UPGRADE_READY_PROMISE).get();
+        if(promiseObj == null || !(promiseObj instanceof CompletableFuture<?>)){
+            return false;
+        }
+        CompletableFuture<?> promise = (CompletableFuture<?>)promiseObj;
+        if (promise.isDone()){
+            return false;
+        }
+
+        if(!closeNonUpgradedDeferred.compareAndSet(false, true)){
+            return true;
+        }
+
+        if(TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+            Tr.debug(tc, "Deferring CLOSE_NON_UPGRADED_STREAMS until upgrade pipeline is installed; current pipeline=" +
+                   nettyContext.pipeline().names() + ", autoRead=" + nettyContext.channel().config().isAutoRead());
+        }
+
+        promise.whenComplete((ok, err) -> {
+            ChannelHandlerContext ctx = nettyContext;
+            if (ctx == null){
+                return;
+            }
+            ctx.executor().execute(() -> {
+                try{
+                    Exception closeError = closeStreams();
+                    if(TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "Deferred CLOSE_NON_UPGRADED_STREAMS closeStreams complete. Error=" + closeError);
+                    }
+                } finally {
+                    if (vc != null) {
+                        vc.getStateMap().put(TransportConstants.CLOSE_NON_UPGRADED_STREAMS, "CLOSED_NON_UPGRADED_STREAMS");
+                    }
+                }
+            });
+        });
+        return true;
+    }
 }

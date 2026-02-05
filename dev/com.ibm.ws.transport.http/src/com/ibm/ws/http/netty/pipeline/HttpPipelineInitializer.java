@@ -34,6 +34,7 @@ import com.ibm.ws.http.netty.pipeline.http2.LibertyNettyALPNHandler;
 import com.ibm.ws.http.netty.pipeline.http2.LibertyUpgradeCodec;
 import com.ibm.ws.http.netty.pipeline.inbound.HttpDispatcherHandler;
 import com.ibm.ws.http.netty.pipeline.inbound.LibertyHttpRequestHandler;
+import com.ibm.ws.http.netty.pipeline.inbound.read.ReadFlowHandler;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -107,8 +108,6 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
         FixedRecvByteBufAllocator channelAllocator = new FixedRecvByteBufAllocator(httpConfig.getIncomingBodyBufferSize());
         LoggingRecvByteBufAllocator loggingAllocator = new LoggingRecvByteBufAllocator(channelAllocator, channel);
         channel.config().setRecvByteBufAllocator(loggingAllocator);
-        //we can add a property if we want to config auto read
-        channel.config().setAutoRead(false);
 
         pipeline.addLast(WRITE_TIMEOUT_HANDER_NAME, new WriteTimeoutHandler(httpConfig.getWriteTimeout(), TimeUnit.MILLISECONDS));
 
@@ -219,6 +218,8 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
         pipeline.addLast(HttpDispatcherHandler.NAME, new HttpDispatcherHandler(httpConfig));
         addPreHttpCodecHandlers(pipeline);
         addPreDispatcherHandlers(pipeline, false);
+        // Turn off auto read for HTTP/1.1
+        pipeline.channel().config().setAutoRead(false);
     }
 
     /**
@@ -242,8 +243,14 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
                 }
                 // Turn on half closure for H1
                 ctx.channel().config().setOption(ChannelOption.ALLOW_HALF_CLOSURE, true);
+                // Turn off auto read for H1
+                ctx.channel().config().setAutoRead(false);
 
                 pipeline.addBefore(HttpDispatcherHandler.NAME, HTTP_KEEP_ALIVE_HANDLER_NAME, new HttpServerKeepAliveHandler());
+                if(pipeline.get(ReadFlowHandler.class) == null){
+                    pipeline.addBefore(HttpDispatcherHandler.NAME, ReadFlowHandler.NAME, ReadFlowHandler.INSTANCE);
+                }
+
                 ctx.channel().attr(NettyHttpConstants.PROTOCOL).set(ProtocolName.HTTP1.name());
                 ctx.pipeline().remove(this);
 
@@ -283,6 +290,9 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
 
         if (!isHttp2) {
             pipeline.addAfter(NETTY_HTTP_SERVER_CODEC, HTTP_KEEP_ALIVE_HANDLER_NAME, new HttpServerKeepAliveHandler());
+            if(pipeline.get(ReadFlowHandler.class) == null) {
+                pipeline.addBefore(HttpDispatcherHandler.NAME, ReadFlowHandler.NAME, ReadFlowHandler.INSTANCE);
+            }
         }
 
         if (pipeline.get(TimeoutHandler.class) == null) {
