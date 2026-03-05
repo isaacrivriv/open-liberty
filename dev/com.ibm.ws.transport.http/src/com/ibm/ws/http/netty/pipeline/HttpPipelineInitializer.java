@@ -160,7 +160,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
         pipeline.addFirst(HTTP_SSL_HANDLER_NAME, handler);
         addPreHttpCodecHandlers(pipeline);
         pipeline.addLast(HTTP_ALPN_HANDLER_NAME, new LibertyNettyALPNHandler(httpConfig));
-        pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig));
+        pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig, chain));
         addPreDispatcherHandlers(pipeline, true);
         pipeline.channel().attr(NettyHttpConstants.IS_SECURE).set(Boolean.TRUE);
         // Turn off half closure with H2
@@ -209,7 +209,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
      */
 
     private void setupH2cPipeline(ChannelPipeline pipeline) {
-        pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig));
+        pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig, chain));
         addPreHttpCodecHandlers(pipeline);
         addH2CCodecHandlers(pipeline);
         addPreDispatcherHandlers(pipeline, true);
@@ -229,7 +229,7 @@ public class HttpPipelineInitializer extends ChannelInitializerWrapper {
         HttpServerCodec sourceCodec = new HttpServerCodec(8192, httpConfig.getIncomingBodyBufferSize(), httpConfig.getLimitOfFieldSize(), httpConfig.getLimitOnNumberOfHeaders());
         pipeline.addLast(CRLF_VALIDATION_HANDLER, CRLFValidationHandler.INSTANCE);
         pipeline.addLast(NETTY_HTTP_SERVER_CODEC, sourceCodec);
-        pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig));
+        pipeline.addLast(HTTP_DISPATCHER_HANDLER_NAME, new HttpDispatcherHandler(httpConfig, chain));
         addPreHttpCodecHandlers(pipeline);
         addPreDispatcherHandlers(pipeline, false);
     }

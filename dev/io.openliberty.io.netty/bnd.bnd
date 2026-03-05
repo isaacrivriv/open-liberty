@@ -46,7 +46,8 @@ Import-Package: \
   @\${repo;io.netty:netty-transport-native-epoll:jar:linux-x86_64;${nettyVersion};EXACT}!/(META-INF/native/*),\
   @\${repo;io.netty:netty-transport-native-epoll:jar:linux-aarch_64;${nettyVersion};EXACT}!/(META-INF/native/*),\
   @\${repo;io.netty:netty-transport-native-kqueue:jar:osx-x86_64;${nettyVersion};EXACT}!/(META-INF/native/*),\
-  @\${repo;io.netty:netty-transport-native-kqueue:jar:osx-aarch_64;${nettyVersion};EXACT}!/(META-INF/native/*)
+  @\${repo;io.netty:netty-transport-native-kqueue:jar:osx-aarch_64;${nettyVersion};EXACT}!/(META-INF/native/*),\
+  @lib/netty-virtualthread-core-1.0-SNAPSHOT.jar
 
 Bundle-NativeCode: \
   META-INF/native/libnetty_transport_native_epoll_aarch_64.so; osname=Linux; processor=aarch64,\
@@ -57,6 +58,7 @@ Bundle-NativeCode: \
 
 Export-Package: \
   !io.netty.handler.ssl.*,\
+  io.netty.loom.*,\
   io.netty.*;version=${nettyVersion}; -split-package:=merge-first
 
 instrument.disabled: true
@@ -64,6 +66,7 @@ instrument.disabled: true
 -fixupmessages.missingexport: "Used bundle version * for exported package";is:=ignore
 
 -buildpath: \
+  lib/netty-virtualthread-core-1.0-SNAPSHOT.jar;version=file,\
   io.netty:netty-buffer;version=${nettyVersion},\
   io.netty:netty-codec;version=${nettyVersion},\
   io.netty:netty-codec-base;version=${nettyVersion},\

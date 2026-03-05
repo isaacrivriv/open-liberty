@@ -359,6 +359,10 @@ public class NettyChain extends HttpChain {
         return bootstrap;
     }
 
+    public NettyFramework getNettyFramework() {
+        return nettyFramework;
+    }
+
     public EndPointInfo getEndpointInfo() {
         EndPointInfo info = endpointMgr.getEndPoint(endpointName);
 

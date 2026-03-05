@@ -12,6 +12,7 @@ package io.openliberty.netty.internal;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ThreadFactory;
 
 import com.ibm.websphere.channelfw.EndPointMgr;
 
@@ -165,5 +166,14 @@ public interface NettyFramework {
      * @return EndPointMgr
      */
     public EndPointMgr getEndpointManager();
+
+
+    /**
+     * helper method for getting virtual thread factory for running blocking code
+     * in virtual threads
+     *
+     * @return EndPointMgr
+     */
+    public ThreadFactory getVirtualThreadFactory();
 
 }

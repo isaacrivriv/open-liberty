@@ -20,6 +20,7 @@ import com.ibm.ws.http.channel.internal.HttpChannelConfig;
 import com.ibm.ws.http.channel.internal.HttpMessages;
 import com.ibm.ws.http.dispatcher.internal.HttpDispatcher;
 import com.ibm.ws.http.dispatcher.internal.channel.HttpDispatcherLink;
+import com.ibm.ws.http.netty.NettyChain;
 import com.ibm.ws.http.netty.NettyHttpConstants;
 import com.ibm.wsspi.bytebuffer.WsByteBuffer;
 import com.ibm.wsspi.bytebuffer.WsByteBufferUtils;
@@ -57,14 +58,16 @@ public class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpR
     private static final TraceComponent tc = Tr.register(HttpDispatcherHandler.class, HttpMessages.HTTP_TRACE_NAME, HttpMessages.HTTP_BUNDLE);
 
     HttpChannelConfig config;
+    private NettyChain chain;
     private ChannelHandlerContext context;
     private final DefaultFullHttpResponse errorResponse;
     private static final String MAX_STREAMS_REFUSED_MESSAGE = "too many client-initiated streams have been refused; closing the connection";
 
-    public HttpDispatcherHandler(HttpChannelConfig config) {
+    public HttpDispatcherHandler(HttpChannelConfig config, NettyChain chain) {
         super(false);
         Objects.requireNonNull(config);
         this.config = config;
+        this.chain = chain;
         errorResponse = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.BAD_REQUEST);
     }
 
@@ -93,22 +96,40 @@ public class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpR
                 context.writeAndFlush(continueResponse);
             }
             FullHttpRequest msg = request;
-            HttpDispatcher.getExecutorService().execute(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        newRequest(context, msg);
-                    } catch (Throwable t) {
+            // If available, try to use the virtual thread factory
+            if (chain.getNettyFramework().getVirtualThreadFactory() != null) {
+                chain.getNettyFramework().getVirtualThreadFactory().newThread(() -> 
+                    {
                         try {
-                            exceptionCaught(context, t);
-                        } catch (Exception e) {
-                            context.close();
+                            newRequest(context, msg);
+                        } catch (Throwable t) {
+                            try {
+                                exceptionCaught(context, t);
+                            } catch (Exception e) {
+                                context.close();
+                            }
+                        } finally {
+                            ReferenceCountUtil.release(msg);
                         }
-                    } finally {
-                        ReferenceCountUtil.release(msg);
+                    }).start();
+            } else { // If not use Liberty executor service
+                HttpDispatcher.getExecutorService().execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            newRequest(context, msg);
+                        } catch (Throwable t) {
+                            try {
+                                exceptionCaught(context, t);
+                            } catch (Exception e) {
+                                context.close();
+                            }
+                        } finally {
+                            ReferenceCountUtil.release(msg);
+                        }
                     }
-                }
-            });
+                });
+            }
         } else {
             if (request.decoderResult().cause() != null) {
                 request.decoderResult().cause().printStackTrace();
@@ -161,6 +182,8 @@ public class HttpDispatcherHandler extends SimpleChannelInboundHandler<FullHttpR
                 context.channel().attr(NettyHttpConstants.THROW_FFDC).set(null);
             } else if (!cause.getMessage().contains("possibly HTTP/0.9")) {
                 FFDCFilter.processException(cause, HttpDispatcherHandler.class.getName() + ".exceptionCaught(ChannelHandlerContext, Throwable)", "1", context);
+            } else {
+                // We have shit here
             }
 
             if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {

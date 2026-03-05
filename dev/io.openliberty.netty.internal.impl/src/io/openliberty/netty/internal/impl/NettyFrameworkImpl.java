@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -72,6 +73,9 @@ import io.netty.util.concurrent.AutoScalingEventExecutorChooserFactory;
 import io.netty.util.concurrent.AutoScalingEventExecutorChooserFactory.AutoScalingUtilizationMetric;
 import io.netty.util.concurrent.Future;
 
+import io.netty.loom.VirtualMultithreadIoEventLoopGroup;
+import io.netty.loom.NettyScheduler;
+
 import io.openliberty.channel.config.ChannelFrameworkConfig;
 import io.openliberty.netty.internal.BootstrapConfiguration;
 import io.openliberty.netty.internal.BootstrapExtended;
@@ -122,6 +126,9 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
             // Do nothing if beta isn't enabled
             return;
         }
+
+        System.out.println("Is NettyScheduler available? " + NettyScheduler.isAvailable());
+
         // Netty specific configurations for performance
         if (System.getSecurityManager() == null) {
             setNettySystemProperties();
@@ -177,8 +184,12 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
                 }
             });
         }
-        AutoScalingEventExecutorChooserFactory scaler = createThreadScaler();
-        childGroup = new MultiThreadIoEventLoopGroup(maxThreads, null, scaler, childFactory);
+        // No scaling in virtual thread executor yet...
+        // AutoScalingEventExecutorChooserFactory scaler = createThreadScaler();
+        // childGroup = new MultiThreadIoEventLoopGroup(maxThreads, null, scaler, childFactory);
+
+        // Use the Virtual Thread Event Loop Group for managing connections
+        childGroup = new VirtualMultithreadIoEventLoopGroup(maxThreads, childFactory);
         outboundConnections = new DefaultChannelGroup(childGroup.next());
         
         if (metricsWindow > 0) {
@@ -888,4 +899,13 @@ public class NettyFrameworkImpl implements ServerQuiesceListener, NettyFramework
     public EndPointMgr getEndpointManager() {
         return EndPointMgrImpl.getRef();
     }
+
+    @Override
+    public ThreadFactory getVirtualThreadFactory() {
+        if (getChildGroup() instanceof VirtualMultithreadIoEventLoopGroup) {
+            return ((VirtualMultithreadIoEventLoopGroup)getChildGroup()).vThreadFactory();
+        }
+        return null;
+    }
+
 }
