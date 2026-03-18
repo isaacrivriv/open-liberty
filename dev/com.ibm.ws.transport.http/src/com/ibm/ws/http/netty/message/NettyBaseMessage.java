@@ -59,6 +59,7 @@ import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http2.HttpConversionUtil;
+import io.netty.util.AsciiString;
 import io.openliberty.http.constants.HttpGenerics;
 import io.openliberty.http.netty.cookie.CookieDecoder;
 import io.openliberty.http.netty.cookie.CookieEncoder;
@@ -245,10 +246,11 @@ public class NettyBaseMessage implements HttpBaseMessage, Externalizable {
 
     @Override
     public List<HeaderField> getHeaders(String name) {
-        List<String> values = headers.getAll(name);
-        List<HeaderField> result = new ArrayList<HeaderField>();
-        for (String value : values) {
-            result.add(new NettyHeader(name, value));
+        HttpHeaderKeys key = HttpHeaderKeys.find(name, Boolean.TRUE);
+        List<HeaderField> result = new LinkedList<HeaderField>();
+        Iterator<String> iterator = headers.valueStringIterator(name);
+        while (iterator.hasNext()) {
+            result.add(new NettyHeader(key, iterator.next()));
         }
         return result;
     }
@@ -265,12 +267,13 @@ public class NettyBaseMessage implements HttpBaseMessage, Externalizable {
 
     @Override
     public List<HeaderField> getAllHeaders() {
-        List<Entry<String, String>> entries = headers.entries();
-        List<HeaderField> headers = new ArrayList<HeaderField>();
-        for (Entry<String, String> entry : entries) {
-            headers.add(new NettyHeader(entry.getKey(), entry.getValue()));
+        Iterator<Entry<String,String>> entries = headers.iteratorAsString();
+        List<HeaderField> allHeaders = new LinkedList<HeaderField>();
+        while (entries.hasNext()) {
+            Entry<String, String> entry = entries.next();
+            allHeaders.add(new NettyHeader(entry.getKey(), entry.getValue()));
         }
-        return headers;
+        return allHeaders;
     }
 
     @Override
