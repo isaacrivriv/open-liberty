@@ -1021,6 +1021,16 @@ public class H2InboundLink extends HttpInboundLink {
             if (linkStatus == LINK_STATUS.CLOSING) {
                 return;
             }
+
+            // Mark the connection as going away before closing the dispatcher link, so threads still
+            // completing a response can see the connection is closing before the link is destroyed.
+            // This does not prevent a GOAWAY from being sent: setStatusLinkToGoAwaySending() only refuses CLOSING.
+            if (linkStatus != LINK_STATUS.GOAWAY_SENDING) {
+                if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                    Tr.debug(tc, "closeConnectionLink: setting :linkStatus: to GOAWAY_SENDING :close: H2InboundLink hc: " + this.hashCode());
+                }
+                linkStatus = LINK_STATUS.GOAWAY_SENDING;
+            }
         }
 
         // Outside of holding the linkStatusSync, try to cleanly close the connection at the dispatcher link, in

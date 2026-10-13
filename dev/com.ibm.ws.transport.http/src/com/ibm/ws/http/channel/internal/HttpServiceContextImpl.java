@@ -39,6 +39,7 @@ import com.ibm.ws.genericbnf.internal.GenericConstants;
 import com.ibm.ws.genericbnf.internal.GenericUtils;
 import com.ibm.ws.http.channel.h2internal.Constants.Direction;
 import com.ibm.ws.http.channel.h2internal.H2HttpInboundLinkWrap;
+import com.ibm.ws.http.channel.h2internal.H2InboundLink;
 import com.ibm.ws.http.channel.h2internal.H2StreamProcessor;
 import com.ibm.ws.http.channel.h2internal.H2VirtualConnectionImpl;
 import com.ibm.ws.http.channel.h2internal.exceptions.CompressionException;
@@ -2213,6 +2214,23 @@ public abstract class HttpServiceContextImpl implements HttpServiceContext, FFDC
         setOutgoingBodyValid(msg.isBodyAllowed());
         if (!isOutgoingBodyValid()) {
             updateBodyLengthHeaders(msg);
+        }
+
+        // Once the H2 link is in GOAWAY_SENDING/CLOSING, the H2 stream layer treats all streams as closed and
+        // discards outgoing frames (see H2StreamProcessor.isStreamClosed). The closing thread may also be
+        // destroying the connection objects concurrently, so don't try to marshall a response.
+        if (this.isH2Connection && isInboundConnection()) {
+            HttpInboundLink link = ((HttpInboundServiceContextImpl) this).getLink();
+            if (link instanceof H2HttpInboundLinkWrap) {
+                H2InboundLink muxLink = ((H2HttpInboundLinkWrap) link).muxLink;
+                if (muxLink != null && muxLink.checkIfGoAwaySendingOrClosing()) {
+                    if (TraceComponent.isAnyTracingEnabled() && tc.isDebugEnabled()) {
+                        Tr.debug(tc, "formatHeaders: HTTP/2.0 connection is closing (GOAWAY sent); not writing headers");
+                    }
+                    setPersistent(false);
+                    throw new IOException("HTTP/2 connection is closing; response headers not written");
+                }
+            }
         }
 
         // get marshalled header buffers
